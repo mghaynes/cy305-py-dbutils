@@ -333,30 +333,26 @@ def main():
     # dbPath = r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries\program_tracker_hw2(soln).accdb"
     # studentDBPath = r"\\usmasvddeecs\eecs\Cadet\Courses\CY305\HAYNES\F3\FOWLER.CHRISTOPHER\database\hw5\program_tracker_hw5.accdb"
 
-    engine = win32com.client.Dispatch("DAO.DBEngine.120")
-    db = engine.OpenDatabase(dbPath)
-    table=db.OpenRecordset("SELECT * from Absence")
-    print(table.RecordCount)
     # Connect to DB
-    # try:  # Try to connect to the database
-    #     conn = pypyodbc.connect(
-    #         r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};" + "Dbq={0};".format(dbPath))
-    # except:
-    #     print('Cannot open DB')
-    #     return 0
+    try:  # Try to connect to the database
+        conn = pypyodbc.connect(
+            r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};" + "Dbq={0};".format(dbPath))
+    except:
+        print('Cannot open DB')
+        return 0
 
     # if we have a good connection to the database
-    # cur = conn.cursor()
-    # tableList = GetTableNames(cur)
-    # queryList = GetQueryNames(cur)
-    # for table in queryList:
-    #     solnTable = Table(dbPath, table, type="QUERY")
-    #     solnTable.PrintTable()
-    #     solnTable.PrintRecords()
-    #     # solnTable.Procedures()
-    #     print('\n')
-    # print('A row:',solnTable.GetValidRow())
-    #     print(solnTable.Statistics())
+    cur = conn.cursor()
+    tableList = GetTableNames(cur)
+    queryList = GetQueryNames(cur)
+    for table in queryList:
+        solnTable = Table(dbPath, table, type="QUERY")
+        solnTable.PrintTable()
+        solnTable.PrintRecords()
+        # solnTable.Procedures()
+        print('\n')
+    print('A row:',solnTable.GetValidRow())
+    # print(solnTable.Statistics())
     # studentTable = Table(studentDBPath, 'EmployeeBioBrief')
     # print(gradeTables(solnTable, studentTable))
 
