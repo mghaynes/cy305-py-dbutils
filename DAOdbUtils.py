@@ -329,14 +329,56 @@ def GetQueryNames(cur):
 
 def main():
     # dbPath = r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries\program_tracker_hw5_soln.accdb"
-    dbPath = r"./program_tracker_hw5_soln.accdb"
+    SolnDBPath = r"./program_tracker_hw5_soln.accdb"
     # dbPath = r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries\program_tracker_hw2(soln).accdb"
     # studentDBPath = r"\\usmasvddeecs\eecs\Cadet\Courses\CY305\HAYNES\F3\FOWLER.CHRISTOPHER\database\hw5\program_tracker_hw5.accdb"
 
-    engine = win32com.client.Dispatch("DAO.DBEngine.120")
-    db = engine.OpenDatabase(dbPath)
-    table=db.OpenRecordset("SELECT * from Absence")
-    print(table.RecordCount)
+    SolnDBEngine = win32com.client.Dispatch("DAO.DBEngine.120")
+
+    # SolnDBEngine = CreateObject("DAO.DBEngine.120")
+    SolnWS = SolnDBEngine.Workspaces(0)
+    try:
+        SolnDB = SolnWS.OpenDatabase(SolnDBPath)
+    except:
+        print('Error opening database')
+        return 0
+    # SolnDB.ShowFields('Absence')
+    # Get the table
+    try:
+        TableDef = SolnDB.TableDefs('Location')
+    except:
+        print('Error opening table')
+        return 0
+
+    # Get field names
+    for Field in TableDef.Fields:
+        print('Name:',Field.Name,'Type:',Field.Type,'Size',Field.Size)
+        for property in Field.Properties:
+            print(property.Name,':',property.Type)
+            # print(property)
+
+    # Get primary keys
+    print('PRIMARY KEYS:',)
+    for idx in TableDef.Indexes:
+        if idx.Primary:
+            for field in idx.Fields:
+                print(field.Name)
+
+    # Get foreign keys
+    print ('FOREIGN KEYS:')
+    for rel in SolnDB.Relations:
+        print('Name:',rel.Name,'ForeignTable:',rel.Table,'Table',rel.ForeignTable,'RelType:',rel.Attributes)
+        for field in rel.Fields:
+            print('FieldNameinForeign',field.Name,'FieldNameinTable',field.ForeignName)
+
+
+
+    # Get SQL
+    for query in SolnDB.QueryDefs:
+        print('QUERY:',query.Name)
+        print(query.SQL)
+
+    # print(fields)
     # Connect to DB
     # try:  # Try to connect to the database
     #     conn = pypyodbc.connect(

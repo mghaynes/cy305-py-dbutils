@@ -1,7 +1,7 @@
 import os, tkinter, pypyodbc, tkinter.messagebox
 import sys, csv, datetime
 
-sys.path.append(r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries")
+# sys.path.append(r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries")
 import dbUtils as db
 
 pypyodbc.lowercase = False
@@ -175,8 +175,8 @@ def setSection(section, tk):
                             try:
                                 studentTable = db.Table(workPath, tableName, type='QUERY')
                                 scoreVector = db.GradeTables(solnTable, studentTable)
-                            except:
-                                pass
+                            except Exception as e:
+                                print('TABLE ERROR:', e)
                         else:
                             maxScore = 0
                             bestBadTableName = ''
@@ -185,7 +185,8 @@ def setSection(section, tk):
                                     try:
                                         studentTable = db.Table(workPath, badTableName, type='QUERY')
                                         scoreVector = db.GradeTables(solnTable, studentTable)
-                                    except:
+                                    except Exception as e:
+                                        print('TABLE ERROR:', e)
                                         errorTables.append(badTableName)
                                 if sum(scoreVector) > maxScore:
                                     bestBadTableName = badTableName
