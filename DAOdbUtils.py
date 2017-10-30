@@ -343,7 +343,7 @@ def main():
         print('Error opening database')
         return 0
     # SolnDB.ShowFields('Absence')
-    # Get the table
+    # Get the table 
     try:
         TableDef = SolnDB.TableDefs('Location')
     except:
