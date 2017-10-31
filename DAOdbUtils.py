@@ -129,34 +129,6 @@ class Table:
             self._CloseConnection()
         return row
 
-    # Generates data that should not be in the table based on column type
-    # def GetBadVal(self, cnt):
-    #     if self._columnTypes[cnt] == 'DATETIME':
-    #         return (datetime.datetime.now(),)
-    #     elif self._columnTypes[cnt] == 'VARCHAR':
-    #         return ('TEST',)
-    #     else:
-    #         return (-99999,)
-
-    # Deletes a specific record (NOTE: Will not work on relationnship table)
-    # def DeleteRecord(key, debug=0):
-    #     sql = "SELECT * FROM [" + self._tableName + "]"
-    #     try:
-    #         rows = self._cur.execute(sql).fetchall()
-    #     except Exception as e:
-    #         if debug==2:
-    #             print('Delete select error',e)
-    #     idTuple = (rows[-1][0],)
-    #     if debug==2:
-    #         print('Last record:', rows[-1])
-    #     sql = "DELETE FROM [" + self._tableName + "]" + " WHERE " + key + " = ?"
-    #     if debug==2:
-    #         print(sql)
-    #     try:
-    #         self._cur.execute(sql, idTuple)
-    #     except Exception as e:
-    #         print('Delete error:',e)
-
 
     def PrimaryKeys(self, debug=0):
         PKs=[]
@@ -198,37 +170,6 @@ class Table:
             self._CloseConnection()
         return FKs, FKTables
 
-    # def PrimaryKeys(self, debug=0):
-    #     PKs = []
-    #     #Iterate through each field and check if it's a primary key
-    #     for cnt,field in enumerate(self._columnNames):
-    #         try:
-    #             # Get a row of existing data from the table. Try to change field to None and insert into table.
-    #             validRow = self.GetValidRow()
-    #             testRow = list(validRow)
-    #             testRow[cnt] = None
-    #             qNums = '?,'*len(testRow)
-    #             qNums = qNums[:-1]
-    #             sql = "INSERT INTO [" + self._tableName + '](' + ','.join(self._columnNames) + ')' + " VALUES ("+qNums+")"
-    #             if debug == 2:
-    #                 print('\t',sql, '; PARAMS:', testRow)
-    #             self._cur.execute(sql,testRow)
-    #             # If we were able to insert into table, there is no primary key! Delete last entry
-    #             self.DeleteRecord(field, debug=debug)
-    #         # Field may be a primary key depending on exception thrown when attempting to insert
-    #         except Exception as e:
-    #             eStr = str(e)
-    #             if debug == 2:
-    #                 print('PK error:',e)
-    #             # Assume it's a primary key if field is autocount, can't insert null, or requires value in field
-    #             if 'You tried to assign the Null value to a variable that is not a Variant data type' in eStr or \
-    #                 'Index or primary key cannot contain a Null value.' in eStr or \
-    #                 'You must enter a value in the' in eStr:
-    #                 if field not in PKs:
-    #                     PKs.append(field)
-    #     if debug:
-    #         print('\tPRIMARY KEYS:',PKs)
-    #     return PKs
 
 
 
@@ -329,33 +270,38 @@ def GetQueryNames(cur):
 
 def main():
     # dbPath = r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries\program_tracker_hw5_soln.accdb"
-    SolnDBPath = r"./program_tracker_hw5_soln.accdb"
+    # SolnDBPath = r"./program_tracker_hw5_soln.accdb"
+    SolnDBPath = r"./DBProject181_soln.accdb"
     # dbPath = r"\\usmasvddeecs\eecs\S&F\Courses\IT305\libraries\program_tracker_hw2(soln).accdb"
     # studentDBPath = r"\\usmasvddeecs\eecs\Cadet\Courses\CY305\HAYNES\F3\FOWLER.CHRISTOPHER\database\hw5\program_tracker_hw5.accdb"
 
     SolnDBEngine = win32com.client.Dispatch("DAO.DBEngine.120")
 
-    # SolnDBEngine = CreateObject("DAO.DBEngine.120")
     SolnWS = SolnDBEngine.Workspaces(0)
     try:
         SolnDB = SolnWS.OpenDatabase(SolnDBPath)
     except:
         print('Error opening database')
         return 0
-    # SolnDB.ShowFields('Absence')
-    # Get the table 
+
+    # Get a table
     try:
-        TableDef = SolnDB.TableDefs('Location')
+        TableDef = SolnDB.TableDefs('SoldierCompletesTraining')
     except:
         print('Error opening table')
         return 0
 
+
+    #Note that the ColumnWidths have some weird conversion of 1 in = 1440
+    LookupFields = ['DisplayControl','RowSourceType','RowSource','BoundColumn','ColumnCount', 'ColumnWidths',
+                    'LimitToList']
     # Get field names
     for Field in TableDef.Fields:
         print('Name:',Field.Name,'Type:',Field.Type,'Size',Field.Size)
         for property in Field.Properties:
-            print(property.Name,':',property.Type)
-            # print(property)
+            if property.Name in LookupFields:
+                print(property.Name,': ', property.Value)
+
 
     # Get primary keys
     print('PRIMARY KEYS:',)
@@ -363,44 +309,34 @@ def main():
         if idx.Primary:
             for field in idx.Fields:
                 print(field.Name)
+    print()
+
 
     # Get foreign keys
     print ('FOREIGN KEYS:')
     for rel in SolnDB.Relations:
-        print('Name:',rel.Name,'ForeignTable:',rel.Table,'Table',rel.ForeignTable,'RelType:',rel.Attributes)
+        print('Name:',rel.Name)
+        print('Foreign Table:',rel.Table,'\tTable:',rel.ForeignTable,'\tAttributes:',rel.Attributes)
         for field in rel.Fields:
-            print('FieldNameinForeign',field.Name,'FieldNameinTable',field.ForeignName)
-
-
+            print('Field in Foreign Table:',field.Name,'\tField in Table:',field.ForeignName)
+    print()
 
     # Get SQL
     for query in SolnDB.QueryDefs:
-        print('QUERY:',query.Name)
-        print(query.SQL)
+        if '~' not in query.Name:
+            print('QUERY:',query.Name)
+            print(query.SQL)
 
-    # print(fields)
-    # Connect to DB
-    # try:  # Try to connect to the database
-    #     conn = pypyodbc.connect(
-    #         r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};" + "Dbq={0};".format(dbPath))
-    # except:
-    #     print('Cannot open DB')
-    #     return 0
+    #Loop through all the records in a table
+    table = SolnDB.OpenRecordset('Platoon')
+    #First get number of records
+    print(table.RecordCount)
+    while not table.EOF:
+        record = table.GetRows()
+        print(record)
 
-    # if we have a good connection to the database
-    # cur = conn.cursor()
-    # tableList = GetTableNames(cur)
-    # queryList = GetQueryNames(cur)
-    # for table in queryList:
-    #     solnTable = Table(dbPath, table, type="QUERY")
-    #     solnTable.PrintTable()
-    #     solnTable.PrintRecords()
-    #     # solnTable.Procedures()
-    #     print('\n')
-    # print('A row:',solnTable.GetValidRow())
-    #     print(solnTable.Statistics())
-    # studentTable = Table(studentDBPath, 'EmployeeBioBrief')
-    # print(gradeTables(solnTable, studentTable))
+
+
 
 if __name__ == "__main__":
     main()
