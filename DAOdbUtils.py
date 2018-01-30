@@ -1,11 +1,17 @@
 import win32com.client
 import collections
 import json
+import Levenshtein
+import re
+import itertools
+import copy
+import numpy as np
 
 cdtDict = {}
 sections = []
 sec = ""
 debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose
+too_many_penalty = .05  # penalty for selecting too many items
 
 Lookup = collections.namedtuple('Lookup', ['DisplayControl', 'RowSourceType', 'RowSource', 'BoundColumn',
                                            'ColumnCount', 'ColumnWidths', 'LimitToList'])
@@ -296,6 +302,18 @@ class Table:
 
 '''END TABLE CLASS '''
 
+def BestMatch(target, options):
+    best_distance = float("inf")
+    best_option = ''
+    for option in options:
+        distance = Levenshtein.distance(target, option)
+        if distance == best_distance:
+            print("In BestMatch have two options with same Levenshtein distance. Check it out")
+        if distance < best_distance:
+            best_distance = distance
+            best_option = option
+    return best_distance, best_option
+
 
 def ListProperties(object):
     for property in object.Properties:
@@ -359,6 +377,7 @@ def GradeRelationships(rltn_dict1, rltn_dict2):
     # if no relationships then return all 1s
     if rltn_dict1 == '':
         return 1, 1, 1, 1, 1, 1
+        # return 0, 0, 0, 0, 0, 0
     num_rltns = len(rltn_dict1.keys())
     if num_rltns == len(rltn_dict2.keys()):
         correct_num_rltns = 1
@@ -477,6 +496,480 @@ def ScoreTable(assessed_table, score_vector=base_table_score):
     # print('Table Score: {}%'.format(table_score*100))
 
 
+def GetNumberMatches(reference_list, list2, debug=True):
+    count = 0
+    matches = []
+    copy_list = copy.deepcopy(reference_list)
+    # if debug:
+    #     print('LIST1:', reference_list)
+    #     print('LIST2:', list2)
+    for item in list2:
+        if item in copy_list:
+            count += 1
+            matches.append(item)
+            copy_list.remove(item)
+    # if debug:
+    #     print('Num Matches: {}\nMatches: {}'.format(count, matches))
+    return count, matches
+
+
+def CleanStatement(statement):
+    clean = statement.strip().replace('(', '').replace(')', '').replace('Max', '').replace('Count', '')\
+                             .replace('Min', '').replace('Avg', '').replace('Sum', '').replace('StDev', '')\
+                             .replace('Var', '').replace('First', '').replace('Last', '')
+    return clean
+
+def GetFieldsFromCompoundField(compound_field):
+    fields = []
+    for field in compound_field.split('.'):
+        if '(' in field:
+            fields.append(field.split('(')[1])
+        elif ')' in field:
+            fields.append(field.split(')')[0])
+        else:
+            fields.append(field)
+    return fields
+
+
+def GetPenaltyMultiple(soln_list, student_list):
+    global too_many_penalty
+    penalty_multiple = 0
+    num_in_soln = np.size(soln_list)
+    num_in_student = np.size(student_list)
+    if num_in_student > num_in_soln:
+        penalty_multiple = too_many_penalty * (num_in_student - num_in_soln)
+    if penalty_multiple > .9:
+        penalty_multiple = .9
+    return penalty_multiple, num_in_soln, num_in_student
+
+# Generically, each access query has following rows: field, table, total, sort, criteria. Additionally, have to
+# check if tables have correct relationships.
+# NOTE: NEED TO ADD WAY TO CHECK IS SHOW BOX CHECKED -- THERE IS A HIDDEN TRUE/FALSE STATEMENT
+'''-----------------------------------------------------------------------------------------------------------------'''
+'''                         FOLLOWING FUNCTIONS USED TO ANALYZE 'SELECT' STATEMENT                                  '''
+def AssessQuerySelect(soln_select, student_select, debug=True):
+    if debug:
+        print('\n\tASSESSING SELECT STATEMENT')
+        print('SOLN: ', soln_select)
+        print('STUDENT: ', student_select)
+    if student_select is None:
+        return 0
+    # Stripping SELECT statement (this is specific to way Access stores as 'SELECT x, y,x\r'
+    soln_fields = soln_select.strip('\r').split('SELECT ')[1].split(', ')
+    student_fields = student_select.strip('\r').split('SELECT ')[1].split(', ')
+    # Split elements on '.' (Access puts table on left of '.' and field name on right)
+    soln_select_elements = []
+    student_select_elements = []
+    for compound_field in soln_fields:
+        soln_select_elements += GetFieldsFromCompoundField(compound_field)
+    for compound_field in student_fields:
+        student_select_elements += GetFieldsFromCompoundField(compound_field)
+    # Check to see how many field,table matches between two queries
+    select_cnt, matches = GetNumberMatches(soln_select_elements, student_select_elements, debug)
+    if debug:
+        print('Solution Select: {}'.format(soln_select_elements))
+        print('Student Select: {}'.format(student_select_elements))
+        print('Matches: {}'.format(matches))
+        print('# Correct: {}\t# Select: {}'.format(select_cnt, len(soln_select_elements)))
+    penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_select_elements, student_select_elements)
+    compare_ratio = (select_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
+    return compare_ratio
+
+
+'''                                     END FROM STATEMENT ANALYSIS                                                 '''
+'''-----------------------------------------------------------------------------------------------------------------'''
+
+
+'''-----------------------------------------------------------------------------------------------------------------'''
+'''                         FOLLOWING 4 FUNCTIONS USED TO ANALYZE 'FROM' STATEMENT                                  '''
+# Purpose of this function is to return the tables, fields, and join types used in query
+# statement is SQL FROM line with 'FROM' already stripped
+def GetKeyFromElements(statement, debug=True):
+    x = 0  # used for debugging purposes only
+    all_joins = []  # list of all tables, fields, and join types in query. Initialized to empty list.
+    cur_joins = [1]  # list of elements found in current parsing. Initialized to not empty for while loop.
+    while len(cur_joins) > 0:
+        # Use regular expression to find elements in statement of format:
+        #  '<TableName1> <INNER|RIGHT|LEFT> JOIN <TableName2> ON <TableName1.FieldName1> = <TableName2.FieldName2>'
+        cur_joins = re.findall(r'\(?\w+ \w+ JOIN \[?\w+\]? ON \w+\.\w+ = \w+\.\w+\)?', statement)
+        # Below loop accounts for nesting elements.
+        for join in cur_joins:
+            # Replace nested elements. Have to do this to go 'up' hierarchy
+            statement = statement.replace(join, 'BLAH'+str(x))
+            if debug:  # print statement after replacing found elements
+                print('De-nesting Iter {}: {}'.format(x+1, statement))
+            # Use of x in the 'BLAH' replacement potentially helps with debugging. Otherwise not needed
+            x += 1
+            # Strip out key elements (i.e. table names, fields, and join types)
+            key_elements = re.findall(r'\w+ JOIN', join)  # Find elements of format '<INNER|RIGHT|LEFT> JOIN'
+            for element in re.findall(r'\w+\.\w+', join):  # Find elements of format '<TableName>.<FieldName>'
+                key_elements += element.split('.')  # Split table name and field name and add to list
+            # Add key elements from JOIN sub-statement to the master list of joins
+            all_joins.append(key_elements)
+    if debug:  # print found relationships
+        for cnt, join in enumerate(all_joins):
+            print('Relationship {}: {}'.format(cnt, join))
+    return all_joins
+
+
+# Check table relationships. If no relationship, add table name to list. If relationship, strip key elements
+def BreakdownQueryFromStmt(from_statement, debug=True):
+    # Stripping 'FROM' from statement to allow additional manipulation.
+    statement1 = from_statement.strip('\r').split('FROM ')[1]
+    stmt_relationships = []
+    for sub_statmenet in statement1.split(', '):  # if no relationship, tables separated by commas
+        if 'JOIN' not in sub_statmenet:  # if no relationship, no JOIN in statement
+            stmt_relationships.append([sub_statmenet])
+        else:  # if relationship exists, get key elements (tables, fields, relationship type)
+            relationships = GetKeyFromElements(statement1, debug)
+            for rltn in relationships:
+                stmt_relationships.append(rltn)
+    if debug:
+        print(stmt_relationships)
+    return stmt_relationships
+
+
+# Compare all possible permutations and return the best possible value
+def CompareStuff(soln_compare, student_compare, num_choose, debug=True):
+    if debug:
+        print('Comparing Stuff')
+    best_comp = []
+    best_comp_val = possible_elements = student_elements = 0
+    # for item in soln_compare:
+    #     possible_elements += len(item)
+    # for item in student_compare:
+    #     student_elements += len(item)
+    for permute in itertools.permutations(soln_compare, num_choose):
+        iter_score = 0
+        for cnt, item in enumerate(student_compare):
+            score, matches = GetNumberMatches(permute[cnt], item, debug)
+            iter_score += score
+        if iter_score > best_comp_val:
+            best_comp_val = iter_score
+            best_comp = permute
+    penalty_factor, possible_elements, student_elements = GetPenaltyMultiple(soln_compare, student_compare)
+    compare_ratio = (best_comp_val / possible_elements) * (1-penalty_factor)  # penalty for choosing too much stuff
+    if debug:
+        print('Best comparison: {}'.format(best_comp))
+        print('Raw comparison score: {}\t# possible elements: {}\t'
+              '# student elements: {}'.format(best_comp_val, possible_elements, student_elements))
+        print('Final FROM score: {}'.format(compare_ratio))
+    return compare_ratio, best_comp
+
+
+# The SQL FROM statement shows which tables were used in the query and the relationship between those tables
+def AssessQueryFrom(soln_from_statement, student_from_statement, debug=True):
+    if debug:
+        print('\n\tASSESSING FROM STATEMENTS')
+        print('Solution FROM Statement:', soln_from_statement)
+    if student_from_statement is None:
+        return 0
+    soln_relationships = BreakdownQueryFromStmt(soln_from_statement, debug)
+    if debug:
+        print('Student FROM Statement:', student_from_statement)
+    student_relationships = BreakdownQueryFromStmt(student_from_statement, debug)
+    from_score, best_comp = CompareStuff(soln_relationships, student_relationships, len(soln_relationships), debug)
+    return from_score
+
+
+'''                                     END FROM STATEMENT ANALYSIS                                                 '''
+'''-----------------------------------------------------------------------------------------------------------------'''
+
+
+'''-----------------------------------------------------------------------------------------------------------------'''
+'''                    FOLLOWING 2 FUNCTIONS USED TO ANALYZE 'AND' AND 'OR' CRITERIA                                '''
+# This function recursively calls itself. Isolates each individual element in a conditional logic statement.
+def GetConditionalElements(statement):
+    #remove all paranthesis and totals key words from statement
+    # temp_statement = ''.join(statement.split('(')).strip()
+    # statement = ''.join(temp_statement.split(')')).strip()
+    statement = CleanStatement(statement)
+    # print(statement)
+    elements = []
+    # list of conditional statments we check for
+    symbols = [' And ', ' Or ', '>=', '<=', '=', '>', '<', 'Between', 'Is Null']
+    for symbol in symbols:
+        if symbol in statement:
+            temp_elements = statement.split(symbol)  # split statement on symbol
+            if len(temp_elements) > 1:
+                for cnt in range(len(temp_elements) - 1):
+                    elements.append(symbol)  # append as many symbols as appear in statement
+                for element in temp_elements:
+                    elements += GetConditionalElements(element)  # recursively call function on each substatement
+            break  # if found a symbol exit loop to prevent duplicates
+    if not elements and statement:  # if elements list is empty and statement is not empty, add operand to list
+        elements.append(statement)
+    return elements
+
+
+def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, debug=True):
+    if debug:
+        print('\n\tASSESSING WHERE/HAVING')
+        print('SOLN WHERE:', soln_where)
+        print('SOLN HAVING:', soln_having)
+        print('STUDENT WHERE:', student_where)
+        print('STUDENT HAVING:', student_having)
+    extra_OR = extra_AND = 0
+    # Stripping WHERE and HAVING statements (specific to way Access stores SQL statements)
+    # Consider various situations
+    if student_where is None and student_having is None:
+        return 0
+    if soln_where is not None and soln_having is None:
+        soln_stripped_stmt = soln_where.strip().split('WHERE ')[1]
+        if student_where is not None and student_having is None:  # compare where's
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1]
+        if student_where is None and student_having is not None:  # compare where to have
+            student_stripped_stmt = student_having.strip().split('HAVING ')[1]
+        if student_where is not None and student_having is not None:  # tricky case
+            pass
+    if soln_where is None and soln_having is not None:
+        soln_stripped_stmt = soln_having.strip().split('HAVING ')[1]
+        if student_where is not None and student_having is None:  # compare having to where
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1]
+        if student_where is None and student_having is not None:  # compare havings
+            student_stripped_stmt = student_having.strip().split('HAVING ')[1]
+        if student_where is not None and student_having is not None:  # tricky case
+            pass
+    if soln_where is not None and soln_having is not None:
+        pass  # have to compare each directly
+    # 'OR' indicates criteria on separate lines so first split on 'OR'
+    # 'AND' indicates criteria in separate fields so second split on 'AND'
+    # 'And' or 'Or' in indicates criteria on the same field, so look at those last
+    soln_OR = soln_stripped_stmt.split(' OR ')
+    student_OR = student_stripped_stmt.split(' OR ')
+    if len(student_OR) > len(soln_OR):
+        extra_OR = len(student_OR) - len(soln_OR)
+    # if debug:
+        # print()
+        # print('SOLN OR', soln_OR)
+        # print('STUDENT OR', student_OR)
+    soln_AND = soln_stripped_stmt.split(' AND ')
+    student_AND = student_stripped_stmt.split(' AND ')
+    if len(student_AND) > len(soln_AND):
+        extra_AND = len(student_AND) - len(soln_AND)
+    first_time_through_loop = True
+    criteria_score = num_criteria_items = 0
+    best_criteria_list = []
+    correct_criteria = []
+    for or2_criteria in student_OR:
+        # print('STUDENT ------- NEW LINE')
+        item2_AND = or2_criteria.split(' AND ')
+        and_score = 0
+        temp_criteria_list = []
+        for and2_criteria in item2_AND:
+            criteria2_items = GetConditionalElements(and2_criteria)
+            # print('Student criteria: {}'.format(criteria2_items))
+            for or_criteria in soln_OR:
+                item_AND = or_criteria.split(' AND ')
+                best_and_match = 0
+                for and_criteria in item_AND:
+                    criteria1_items = GetConditionalElements(and_criteria)
+                    if first_time_through_loop:
+                        num_criteria_items += len(criteria1_items)
+                        correct_criteria += criteria1_items
+                    # num_matches = len(set(criteria1_items).intersection(criteria2_items))
+                    num_matches, matches = GetNumberMatches(criteria1_items, criteria2_items)
+                    # print('\tCriteria Comparison: {}; Score: {}'.format(criteria1_items, num_matches))
+                    if num_matches > best_and_match:
+                        best_and_match = num_matches
+                        temp_criteria_list.append(and2_criteria)
+                first_time_through_loop = False
+                and_score += best_and_match
+                # print('BEST AND MATCH: {}'.format(best_and_match))
+        # print('\tAND SCORE: {}'.format(and_score))
+        if and_score > criteria_score:
+            criteria_score = and_score
+            best_criteria_list += temp_criteria_list
+    if debug:
+        print('Correct Criteria List: {}'.format(correct_criteria))
+        print('Best match: {}'.format(best_criteria_list))
+        print('Total # elements: {}'.format(num_criteria_items))
+        print('Closest match # elements: {}'.format(criteria_score))
+    final_criteria_score = (criteria_score/num_criteria_items) * (1-(too_many_penalty*(extra_AND+extra_OR)))
+    return final_criteria_score
+
+
+# Checks for correct relationships in query
+def AssessQueryTotals(soln_totals, student_totals, debug=True):
+    if debug:
+        print('\n\tASSESSING TOTALS STATEMENT')
+        print('SOLN: ', soln_totals)
+        print('STUDENT: ', student_totals)
+    if student_totals is None:
+        return 0
+    # Stripping SELECT statement
+    soln_fields = soln_totals.strip('\r').split('SELECT ')[1].split(', ')
+    student_fields = student_totals.strip('\r').split('SELECT ')[1].split(', ')
+    # See which statments have totals functions, then add them to list
+    soln_totals_elements = []
+    student_totals_elements = []
+    for compound_field in soln_fields:
+        if '(' in compound_field:
+            temp_elements = []
+            temp_elements.append(compound_field.split('(')[0])
+            temp_elements += GetFieldsFromCompoundField(compound_field)
+            soln_totals_elements.append(temp_elements)
+    for compound_field in student_fields:
+        if '(' in compound_field:
+            temp_elements = []
+            temp_elements.append(compound_field.split('(')[0])
+            temp_elements += GetFieldsFromCompoundField(compound_field)
+            student_totals_elements.append(temp_elements)
+    # Check to see how many field,table matches between two queries
+    # select_cnt, matches = GetNumberMatches(soln_select_elements, student_select_elements, debug)
+    num_totals = len(soln_totals_elements)
+    compare_ratio, best_match = CompareStuff(soln_totals_elements, student_totals_elements, num_totals, False)
+    if debug:
+        print('Solution Totals: {}'.format(soln_totals_elements))
+        print('Student Totals: {}'.format(student_totals_elements))
+        print('Best Match: {}'.format(best_match))
+        print('# Correct: {}\t# Select: {}'.format(np.size(soln_totals_elements), np.size(best_match)))
+    # penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_select_elements, student_select_elements)
+    # compare_ratio = (select_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
+    return compare_ratio
+
+
+# NOTE: This function is almsot verbatim same as AssessQuerySelect function; consider combining for efficiency?
+def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
+    if debug:
+        print('\n\tASSESSING GROUP BY STATEMENT')
+        print('SOLN: ', soln_groupby)
+        print('STUDENT: ', student_groupby)
+    if student_groupby is None:
+        return 0
+    # Stripping SELECT statement (this is specific to way Access stores as 'SELECT x, y,x\r'
+    soln_fields = soln_groupby.strip('\r').split('GROUP BY ')[1].split(', ')
+    student_fields = student_groupby.strip('\r').split('GROUP BY ')[1].split(', ')
+    # Split elements on '.' (Access puts table on left of '.' and field name on right)
+    soln_groupby_elements = []
+    student_groupby_elements = []
+    for compound_field in soln_fields:
+        soln_groupby_elements += GetFieldsFromCompoundField(compound_field)
+    for compound_field in student_fields:
+        student_groupby_elements += GetFieldsFromCompoundField(compound_field)
+    # Check to see how many field,table matches between two queries
+    groupby_cnt, matches = GetNumberMatches(soln_groupby_elements, student_groupby_elements, debug)
+    if debug:
+        print('Solution group by: {}'.format(soln_groupby_elements))
+        print('Student group by: {}'.format(student_groupby_elements))
+        print('Matches: {}'.format(matches))
+        print('# Correct: {}\t# Groupby: {}'.format(groupby_cnt, len(soln_groupby_elements)))
+    penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_groupby_elements, student_groupby_elements)
+    compare_ratio = (groupby_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
+    return compare_ratio
+
+
+# Need to add something for ascending vs descending
+def AssessQuerySort(soln_sort, student_sort, debug=True):
+    if debug:
+        print('\n\tASSESSING SORT')
+        print('Soln Sort:', soln_sort)
+        print('Student Sort:', student_sort)
+    if student_sort is None:
+        return 0
+    sort_score = order_score = direction_score = 0
+    soln_sort = CleanStatement(soln_sort)
+    student_sort = CleanStatement(student_sort)
+    # Stripping ORDER BY statement (specific to way Access stores SQL statements)
+    soln_stripped_sort = soln_sort.strip(';').split('ORDER BY ')[1].split(', ')
+    student_stripped_sort = student_sort.strip(';').split('ORDER BY ')[1].split(', ')
+    print(soln_stripped_sort)
+    print(student_stripped_sort)
+    for cnt, soln_field in enumerate(soln_stripped_sort):
+        soln_elements = soln_field.split(' DESC')
+        for cnt2, student_field in enumerate(student_stripped_sort):
+            student_elements = student_field.split(' DESC')
+            if soln_elements[0] in student_elements[0]:
+                sort_score += 1
+                if cnt == cnt2:
+                    order_score += 1
+                if len(soln_elements) == len(student_elements):
+                    direction_score += 1
+    num_elements = len(soln_stripped_sort)
+    if debug:
+        print('Fields Score: {}\nOrder score: {}\nDirection score: {}'.format(sort_score, order_score, direction_score))
+    final_score = (sort_score + order_score + direction_score) / num_elements / 3
+    return final_score
+
+
+def FindSubStatement(statement_list, substring):
+    if statement_list is None:
+        return None
+    for substatement in statement_list:
+        if substring in substatement:
+            return substatement
+
+
+def AssessQuery(query1, query2, debug=True):
+    print('ASSESSING QUERY')
+    row_count_score = exact_rec_score = select_score = from_score = criteria_score \
+                    = groupby_score = totals_score = sort_score = 0
+    where_penalty = having_penalty = groupby_penalty = sort_penalty = False
+    if query1.RecordCount == query2.RecordCount:
+        row_count_score = 1
+    if row_count_score:
+        exact_rec_score = AssessTableEntries(query1, query2)
+    # If some variation of exact record match then return
+    if exact_rec_score == 4:
+        if debug:
+            print('Exact record match: {}'.format(exact_rec_score))
+        # return 1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty
+    SQL1_parts = query1.SQL.strip().split('\n')
+    SQL2_parts = query2.SQL.strip().split('\n')
+    # first element of any query SQL is the select statement, so see if they are selecting correct fields
+    soln_criteria_statements = []
+    student_criteria_statements = []
+
+    # Assess the 'SELECT' statement
+    soln_select = FindSubStatement(SQL1_parts, 'SELECT')
+    student_select = FindSubStatement(SQL2_parts, 'SELECT')
+    if student_select is not None: # Always a SELECT in correct solution, so check to see if a student SELECT
+        select_score = AssessQuerySelect(soln_select, student_select)
+
+    # Assess the 'FROM' statement
+    soln_from = FindSubStatement(SQL1_parts, 'FROM')
+    student_from = FindSubStatement(SQL2_parts, 'FROM')
+    if student_from is not None:  # Always a FROM in correct solution, so check to see if a student FROM
+        from_score = AssessQueryFrom(soln_from, student_from)
+
+    # Assess 'WHERE' and 'HAVING' criteria
+    soln_where = FindSubStatement(SQL1_parts, 'WHERE')
+    soln_having = FindSubStatement(SQL1_parts, 'HAVING')
+    student_where = FindSubStatement(SQL2_parts, 'WHERE')
+    student_having = FindSubStatement(SQL2_parts, 'HAVING')
+    if soln_where is not None or soln_having is not None:  # If there is WHERE or HAVING in solution, assess
+        criteria_score = AssessQueryCriteria(soln_where, soln_having, student_where, student_having)
+    if soln_where is None and student_where is not None:
+        where_penalty = True  # Penalty for using WHERE when not supposed to
+    if soln_having is None and student_having is not None:
+        having_penalty = True  # Penalty for using HAVING when not supposed to
+
+    # Assess 'GROUPBY' and Totals functions
+    soln_groupby = FindSubStatement(SQL1_parts, 'GROUP BY')
+    student_groupby = FindSubStatement(SQL2_parts, 'GROUP BY')
+    if soln_groupby is not None:  # If there is a GROUP BY in solution
+        groupby_score = AssessQueryGroupby(soln_groupby, student_groupby)
+    if '(' in soln_select or ')' in soln_select:
+        totals_score = AssessQueryTotals(soln_select, student_select)
+    if (soln_groupby is None and student_groupby is not None) or ('(' not in soln_select and '(' in student_select):
+        groupby_penalty = True  # Penalty for using totals functions when not supposed to
+
+    # Add assess totals here for the other functions based on select statement
+
+    # Assess 'SORT'
+    soln_sort = FindSubStatement(SQL1_parts, 'ORDER')
+    student_sort = FindSubStatement(SQL2_parts, 'ORDER')
+    if soln_sort is not None:  # If there is ORDER in solution, assess
+            sort_score = AssessQuerySort(soln_sort, student_sort)
+    if soln_sort is None and student_sort is not None:
+        pass  # Penalty for sorting when not supposed to
+
+    print('\nSELECT score: {}\nFROM score: {}\nWHERE/HAVING score: {}\nGROUP BY score: {}\nTOTALS score: {}'
+          '\nSORT score: {}'.format(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score))
+    print('\n{}'.format(query1.SQL))
+    print(query2.SQL)
+    return select_score, from_score, criteria_score, groupby_score, totals_score, sort_score, \
+           where_penalty, having_penalty, groupby_penalty, sort_penalty
 '''-----------------------------------------------------------------------------------------------'''
 '''-----------------------------------------------------------------------------------------------'''
 
@@ -509,6 +1002,11 @@ def main():
     # print the properties for some metadata (e.g. Table, Query, or Field)
     print('Table Properties')
     ListProperties(table._TableMetaData)
+    # print('\nField Properties')
+    # ListProperties(field)
+    # print('\nQuery Properties')
+    # ListProperties(SolnDB.Queries['APFTStars']._TableMetaData)
+
     # table_assessment = AssessTables(SolnDB.Tables['SoldierCompletesTraining'],
     #                                 StudentDB.Tables['SoldierCompletesTraining'])
     table_assessment = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'])
@@ -516,7 +1014,14 @@ def main():
     print('Comparing "SoldierCompletesTraining" tables...')
     print(table_assessment)
     ScoreTable(table_assessment)
-
+    # AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
+    # AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
+    # AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
+    # AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
+    # AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
+    # AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
+    # AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
+    AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
 
 if __name__ == "__main__":
     main()
