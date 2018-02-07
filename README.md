@@ -1,4 +1,4 @@
-# Access Databse Utilities
+# Access Database Utilities
 The purpose of this project is to create utilities to assist in grading the 
 USMA CY305 database project. These utilities are designed to work with 
 Microsoft Access files (.accdb).
