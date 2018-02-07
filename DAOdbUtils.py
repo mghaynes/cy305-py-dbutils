@@ -1,3 +1,4 @@
+# pip install pypiwin32
 import win32com.client
 import collections
 import json
@@ -141,7 +142,7 @@ class Table:
                 self.RecordCount = self.QueryRecordCount()
         self.ColumnMetaData = self.GetColumnMetaData(table_meta)
         self.ColumnCount = len(self.ColumnMetaData)
-
+        
     def __str__(self):
         column_tuples = [(field.Name, field.Type, field.Size) for field in self.ColumnMetaData]
         if self.TableType == 'TABLE':
@@ -159,6 +160,14 @@ class Table:
         else:
             return ''
                 # self._rows = self.RowCount(self.debug)
+
+    def hasColumn(self, name):
+        column_meta = self.ColumnMetaData
+        found = False
+        for col in column_meta:
+            if name in col.Name:
+                return True
+        return False
 
     def QueryRecordCount(self):
         self._db = self._ws.OpenDatabase(self._dbPath)
