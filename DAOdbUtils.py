@@ -1,16 +1,23 @@
+# you'll need to import these libraries
 import win32com.client
+import Levenshtein
+import numpy as np
+# these are built in to python
 import collections
 import json
-import Levenshtein
 import re
 import itertools
 import copy
-import numpy as np
 
-cdtDict = {}
-sections = []
-sec = ""
-debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose
+
+'''
+TO DO: 
+1) Check if the field is supposed to be hidden for queries
+2) Add functions to check lookup properties
+
+'''
+
+debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose (NOT IMPLEMENTED YET)
 too_many_penalty = .05  # penalty for selecting too many items
 
 Lookup = collections.namedtuple('Lookup', ['DisplayControl', 'RowSourceType', 'RowSource', 'BoundColumn',
@@ -20,8 +27,10 @@ ColumnMeta = collections.namedtuple('ColumnMeta', ['Name', 'Type', 'Size'])
 Relationship = collections.namedtuple('Relationship', ['Table', 'Field', 'RelatedTable', 'RelatedField',
                                                        'EnforceIntegrity', 'JoinType', 'Attributes'])
 
-# class Relationship(collections.namedtuple('Relationship', ['Table', 'Field', 'RelatedTable', 'RelatedField',
-#                                                            'EnforceIntegrity', 'JoinType','Attributes'])):
+
+'''-----------------------------------------------------------------------------------------------------------------'''
+'''                                               CLASS: DATABASE                                                   '''
+'''    DataBase class loads key properties of database to include relationships, table, and query properties        '''
 
 
 class DataBase:
@@ -117,7 +126,14 @@ class DataBase:
                         print(relationships[table_name][foreign_name][field_name])
         return relationships
 
-    ''' END DATABASE CLASS '''
+
+'''---------------------------------------------- END DATABASE CLASS ------------------------------------------------'''
+
+
+'''-----------------------------------------------------------------------------------------------------------------'''
+'''                                               CLASS: TABLE                                                      '''
+''' DataBase class permits various operations on tables/queries to include getting records, SQL, lookups, keys,     '''
+''' and more.                                                                                                       '''
 
 class Table:
     def __init__(self, table_meta=None, isTable=True, dbPath=None, debug=0):
@@ -238,21 +254,6 @@ class Table:
             print(self.Name.upper(),'primary keys:', ','.join(PKs))
         return PKs
 
-    # def GetForeignKeys(self, debug=0):
-    #     FKs = dict()
-    #     self._db = self._ws.OpenDatabase(self._dbPath)
-    #     if self.Name in self._db.Relationships:
-    #         pass
-            # for rltn_name in self._db.Relationships[self.Name].keys():
-                # FKs[rltn_name] = self._db.Relationships[self.Name][rltn_name]
-        # self._db.Close()
-        # for foreign_name in FKs.keys():
-        #     for field_name in FKs[foreign_name].keys():
-        #         print(FKs[foreign_name][field_name])
-
-        # return FKs
-
-
     def GetSQL(self, query, debug=0):
         if '~' not in query.Name:
             if debug:
@@ -261,7 +262,6 @@ class Table:
             return query.SQL
         else:
             return 0
-
 
     def GetRecords(self, debug=0):
         self._db = self._ws.OpenDatabase(self._dbPath)
@@ -277,7 +277,6 @@ class Table:
                 print(temp_rec)
         self._db.Close()
         return records
-
 
     def GetFieldObject(self, name):
         return self._TableMetaData.Fields(name)
@@ -300,28 +299,11 @@ class Table:
             sizes.append(column.Size)
         return sizes
 
-'''END TABLE CLASS '''
 
-def BestMatch(target, options):
-    best_distance = float("inf")
-    best_option = ''
-    for option in options:
-        distance = Levenshtein.distance(target, option)
-        if distance == best_distance:
-            print("In BestMatch have two options with same Levenshtein distance. Check it out")
-        if distance < best_distance:
-            best_distance = distance
-            best_option = option
-    return best_distance, best_option
+'''---------------------------------------------- END TABLE CLASS ------------------------------------------------'''
 
 
-def ListProperties(object):
-    for property in object.Properties:
-        try:
-            print(property.Name, ':', property.Value)
-        except:
-            print(property.Name)
-
+# CLASS TableScore
 class TableScore(collections.namedtuple('TableScore',['NameScore','RowCountScore','ColCountScore','FieldNameScore',
                                                       'FieldTypeScore','FieldSizeScore','RowsScore', 'SamePriKeysScore',
                                                       'DiffPriKeysScore', 'Correct_Num_Rltns', 'Fld', 'Rltd_Tbl',
@@ -355,21 +337,74 @@ class TableScore(collections.namedtuple('TableScore',['NameScore','RowCountScore
                diff_pri_keys_str+num_rltns_str+fld_str+rltd_tbl_str+rltd_fld_str+join_str+integrity_str+row_score_str
 
 
+def AssignTableWeights(NameScore=0, RowCountScore=0, ColCountScore=0, FieldNameScore=0, FieldTypeScore=0,
+                       FieldSizeScore=0, RowsScore=0, SamePriKeysScore=0, DiffPriKeysScore=0, Correct_Num_Rltns=0,
+                       Fld=0, Rltd_Tbl=0, Rltd_Fld=0, Join=0, Integrity=0):
+    return TableScore(NameScore, RowCountScore, ColCountScore, FieldNameScore, FieldTypeScore,
+                              FieldSizeScore, RowsScore, SamePriKeysScore, DiffPriKeysScore,
+                              Correct_Num_Rltns, Fld, Rltd_Tbl, Rltd_Fld, Join, Integrity)
+
+
 # base_table_score allocates 20% fields, 40% PKs, 40% relationships (doesn't check table values)
-base_table_score = TableScore(NameScore=.05, RowCountScore=0, ColCountScore=0, FieldNameScore=.05, FieldTypeScore=.1,
-                              FieldSizeScore=0, RowsScore=0, SamePriKeysScore=.4, DiffPriKeysScore=0,
-                              Correct_Num_Rltns=.025, Fld=.075, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.025, Integrity=.075)
-# no relations table score allocations 20 (doesn't check table values or relationships)
-# no_rltns_table_score = TableScore(NameScore=.1, RowCountScore=.1, ColCountScore=.1, FieldNameScore=.1,
-#                                   FieldTypeScore=.1, FieldSizeScore=.1, RowsScore=.1, SamePriKeysScore=.1,
-#                                   DiffPriKeysScore=.1, Correct_Num_Rltns=.1, Fld=.1, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.1,
-#                                   Integrity=0)
-# base2_table_score = TableScore(NameScore=.1, RowCountScore=.1, ColCountScore=.1, FieldNameScore=.1, FieldTypeScore=.1,
-#                               FieldSizeScore=.1, RowsScore=.1, SamePriKeysScore=.1, DiffPriKeysScore=.1,
-#                               Correct_Num_Rltns=.1, Fld=.1, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.1, Integrity=0)
-# base3_table_score = TableScore(NameScore=.1, RowCountScore=.1, ColCountScore=.1, FieldNameScore=.1, FieldTypeScore=.1,
-#                               FieldSizeScore=.1, RowsScore=.1, SamePriKeysScore=.1, DiffPriKeysScore=.1,
-#                               Correct_Num_Rltns=.1, Fld=.1, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.1, Integrity=0)
+base_table_weight = AssignTableWeights(NameScore=.05, FieldNameScore=.05, FieldTypeScore=.1, SamePriKeysScore=.4,
+                                      Correct_Num_Rltns=.025, Fld=.075, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.025,
+                                      Integrity=.075)
+
+# CLASS
+class QueryScore(collections.namedtuple('QueryScore',['SELECTscore', 'FROMscore', 'CRITERIAscore', 'GROUPBYscore',
+                                                      'TOTALSscore', 'SORTscore', 'WHEREpenalty', 'HAVINGpenalty',
+                                                      'GROUPBYpenalty', 'SORTpenalty', 'MatchScore'])):
+    def __str__(self):
+        select_str = 'SELECT score : {}\n'.format(self.SELECTscore)
+        from_str = 'FROM score: {}\n'.format(self.FROMscore)
+        criteria_str = 'CRITERIA score: {}\n'.format(self.CRITERIAscore)
+        groupby_str = 'GROUPBY score: {}\n'.format(self.GROUPBYscore)
+        totals_str = 'TOTALS score: {}\n'.format(self.TOTALSscore)
+        sort_str = 'SORT score: {}\n'.format(self.SORTscore)
+        where_penalty_str = 'WHERE penalty: {}\n'.format(self.WHEREpenalty)
+        having_penalty_str = 'HAVING penalty: {}\n'.format(self.HAVINGpenalty)
+        groupby_penalty_str = 'GROUPBY penalty: {}\n'.format(self.GROUPBYpenalty)
+        sort_penalty_str = 'SORT penalty: {}\n'.format(self.SORTpenalty)
+        row_score_str = 'Exact records match: {}'.format(self.MatchScore)
+        return select_str+from_str+criteria_str+groupby_str+totals_str+sort_str+where_penalty_str+ \
+               having_penalty_str+groupby_penalty_str+sort_penalty_str+row_score_str
+
+def AssignQueryWeights(SELECTscore=0, FROMscore=0, CRITERIAscore=0, GROUPBYscore=0, TOTALSscore=0,
+                       SORTscore=0, WHEREpenalty=0, HAVINGpenalty=0, GROUPBYpenalty=0, SORTpenalty=0, MatchScore=0):
+    return QueryScore(SELECTscore, FROMscore, CRITERIAscore, GROUPBYscore, TOTALSscore,
+                       SORTscore, WHEREpenalty, HAVINGpenalty, GROUPBYpenalty, SORTpenalty, MatchScore)
+
+# default query weighting
+base_query_weight = AssignQueryWeights(SELECTscore=0.2, FROMscore=0.2, CRITERIAscore=0.25, GROUPBYscore=0.125,
+                                       TOTALSscore=0.125, SORTscore=0.1, WHEREpenalty=.1, HAVINGpenalty=.1,
+                                       GROUPBYpenalty=.1, SORTpenalty=.1, MatchScore=0)
+
+
+
+
+
+# returns Lenvenshtein distance between a target string and a list of strings. (CURRENTLY NOT USED)
+# VARIABLE: Target  TYPE: String
+# VARIABLE: Options TYPE: List (with elements being strings)
+def BestMatch(target, options):
+    best_distance = float("inf")
+    best_option = ''
+    for option in options:
+        distance = Levenshtein.distance(target, option)
+        if distance == best_distance:
+            print("In BestMatch have two options with same Levenshtein distance. Check it out")
+        if distance < best_distance:
+            best_distance = distance
+            best_option = option
+    return best_distance, best_option
+
+
+def ListProperties(object):
+    for property in object.Properties:
+        try:
+            print(property.Name, ':', property.Value)
+        except:
+            print(property.Name)
 
 
 def GradeRelationships(rltn_dict1, rltn_dict2):
@@ -410,6 +445,7 @@ def GradeRelationships(rltn_dict1, rltn_dict2):
     print('related field:{}\njoin:{}\nintegrity:{}'.format(rltd_fld, join, integrity))
     return correct_num_rltns, fld, rltd_tbl, rltd_fld, join, integrity
 
+
 def AssessTableEntries(table1, table2):
     table1_recs = table1.GetRecords()
     table2_recs = table2.GetRecords()
@@ -443,6 +479,7 @@ def AssessTableEntries(table1, table2):
                 exact_rec_score = 0
                 break
     return exact_rec_score
+
 
 # Note: Table1 should be the 'correct' table/query. Table 2 is compared against Table 1.
 # The scores are returned as percentages. For example, if you had 2 of 3 primary keys correct the
@@ -489,11 +526,19 @@ def AssessTables(table1, table2):
     return table_score
 
 
-def ScoreTable(assessed_table, score_vector=base_table_score):
+def ScoreTable(assessed_table, score_vector=base_table_weight):
     table_score = 0
     for cnt in range(len(assessed_table)):
         table_score += assessed_table[cnt]*score_vector[cnt]
-    # print('Table Score: {}%'.format(table_score*100))
+    return table_score
+
+
+def ScoreQuery(assessed_query, score_vector=base_query_weight):
+    query_score = 0
+    for cnt in range(len(assessed_query)):
+        if not isinstance(assessed_query[cnt], bool):
+            query_score += assessed_query[cnt]*score_vector[cnt]
+    return query_score
 
 
 def GetNumberMatches(reference_list, list2, debug=True):
@@ -542,11 +587,15 @@ def GetPenaltyMultiple(soln_list, student_list):
         penalty_multiple = .9
     return penalty_multiple, num_in_soln, num_in_student
 
+
+# ========================== FOLLOWING FUNCTIONS USED TO ASSESS THE QUERY SQL STATEMENT ============================== #
 # Generically, each access query has following rows: field, table, total, sort, criteria. Additionally, have to
 # check if tables have correct relationships.
 # NOTE: NEED TO ADD WAY TO CHECK IS SHOW BOX CHECKED -- THERE IS A HIDDEN TRUE/FALSE STATEMENT
 '''-----------------------------------------------------------------------------------------------------------------'''
 '''                         FOLLOWING FUNCTIONS USED TO ANALYZE 'SELECT' STATEMENT                                  '''
+
+
 def AssessQuerySelect(soln_select, student_select, debug=True):
     if debug:
         print('\n\tASSESSING SELECT STATEMENT')
@@ -720,8 +769,9 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
             student_stripped_stmt = student_where.strip().split('WHERE ')[1]
         if student_where is None and student_having is not None:  # compare where to have
             student_stripped_stmt = student_having.strip().split('HAVING ')[1]
-        if student_where is not None and student_having is not None:  # tricky case
-            pass
+        if student_where is not None and student_having is not None:  # just compare where's
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1] + ' OR ' + \
+                                    student_having.strip().split('HAVING ')[1]
     if soln_where is None and soln_having is not None:
         soln_stripped_stmt = soln_having.strip().split('HAVING ')[1]
         if student_where is not None and student_having is None:  # compare having to where
@@ -729,9 +779,18 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
         if student_where is None and student_having is not None:  # compare havings
             student_stripped_stmt = student_having.strip().split('HAVING ')[1]
         if student_where is not None and student_having is not None:  # tricky case
-            pass
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1] + ' OR ' + \
+                                    student_having.strip().split('HAVING ')[1]
     if soln_where is not None and soln_having is not None:
-        pass  # have to compare each directly
+        # combine statments with an OR
+        soln_stripped_stmt = soln_where.strip().split('WHERE ')[1] + ' OR ' + soln_having.strip().split('HAVING ')[1]
+        if student_where is not None and student_having is None:  # compare having to where
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1]
+        if student_where is None and student_having is not None:  # compare havings
+            student_stripped_stmt = student_having.strip().split('HAVING ')[1]
+        if student_where is not None and student_having is not None:  # combine both with an ' OR '
+            student_stripped_stmt = student_where.strip().split('WHERE ')[1] + ' OR ' + \
+                                    student_having.strip().split('HAVING ')[1]
     # 'OR' indicates criteria on separate lines so first split on 'OR'
     # 'AND' indicates criteria in separate fields so second split on 'AND'
     # 'And' or 'Or' in indicates criteria on the same field, so look at those last
@@ -905,6 +964,13 @@ def AssessQuery(query1, query2, debug=True):
     row_count_score = exact_rec_score = select_score = from_score = criteria_score \
                     = groupby_score = totals_score = sort_score = 0
     where_penalty = having_penalty = groupby_penalty = sort_penalty = False
+    if query1.SQL == query2.SQL:
+        if debug:
+            print('Exact SQL match')
+            print('SOLN SQL:', query1)
+            print('STUDENT SQL:', query2)
+        return QueryScore(1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty, 4)
+
     if query1.RecordCount == query2.RecordCount:
         row_count_score = 1
     if row_count_score:
@@ -913,7 +979,9 @@ def AssessQuery(query1, query2, debug=True):
     if exact_rec_score == 4:
         if debug:
             print('Exact record match: {}'.format(exact_rec_score))
-        # return 1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty
+            print('SOLN SQL:', query1)
+            print('STUDENT SQL:', query2)
+        return QueryScore(1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty, 4)
     SQL1_parts = query1.SQL.strip().split('\n')
     SQL2_parts = query2.SQL.strip().split('\n')
     # first element of any query SQL is the select statement, so see if they are selecting correct fields
@@ -968,8 +1036,9 @@ def AssessQuery(query1, query2, debug=True):
           '\nSORT score: {}'.format(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score))
     print('\n{}'.format(query1.SQL))
     print(query2.SQL)
-    return select_score, from_score, criteria_score, groupby_score, totals_score, sort_score, \
-           where_penalty, having_penalty, groupby_penalty, sort_penalty
+    query_results = QueryScore(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score, \
+           where_penalty, having_penalty, groupby_penalty, sort_penalty, exact_rec_score)
+    return query_results
 '''-----------------------------------------------------------------------------------------------'''
 '''-----------------------------------------------------------------------------------------------'''
 
@@ -1000,10 +1069,11 @@ def main():
     table.GetLookups(field, debug=2)
     print()
     # print the properties for some metadata (e.g. Table, Query, or Field)
-    print('Table Properties')
-    ListProperties(table._TableMetaData)
+    # print('Table Properties')
+    # ListProperties(table._TableMetaData)
     # print('\nField Properties')
     # ListProperties(field)
+    # print(field.Properties['ColumnHidden'].Value)
     # print('\nQuery Properties')
     # ListProperties(SolnDB.Queries['APFTStars']._TableMetaData)
 
@@ -1013,15 +1083,18 @@ def main():
     print()
     print('Comparing "SoldierCompletesTraining" tables...')
     print(table_assessment)
-    ScoreTable(table_assessment)
-    # AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
-    # AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
-    # AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
-    # AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
-    # AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
-    # AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
-    # AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
-    AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
+    print('\nFinal Table Score: ', ScoreTable(table_assessment))
+    # query_assessment = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
+    # query_assessment = AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
+    # query_assessment = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
+    # query_assessment = AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
+    # query_assessment = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
+    query_assessment = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
+    # query_assessment = AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
+    # query_assessment = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
+    print()
+    print('\nFinal Query Score: ', ScoreQuery(query_assessment))
+    print(query_assessment)
 
 if __name__ == "__main__":
     main()
