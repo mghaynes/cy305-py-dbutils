@@ -1,4 +1,4 @@
-# Access Database Utilities
+# Python Utility for Microsoft Access Database
 The purpose of this project is to create utilities to assist in grading the 
 USMA CY305 database project. These utilities are designed to work with 
 Microsoft Access files (.accdb).
@@ -18,7 +18,7 @@ tested using Microsoft Access 2013 and the
 [Microsoft Access Database Engine 2010](https://www.microsoft.com/en-us/download/details.aspx?id=13255).
 
 2. Install the following python modules:
-  + win32com.client (pypiwin32)
+  + win32com (pypiwin32)
   + levenshtein (python-Levenshtein)
   + numpy (numpy)
 
@@ -42,7 +42,7 @@ StudentDB = DataBase(StudentDBPath)
  ``` python
    print(SolnDB.TableNames)
  ```
- The wiki documentation contains a complete listing of available variables 
+ The [wiki documentation](https://github.com/mghaynes/cy305-py-dbutils/wiki) contains a complete listing of available variables 
  and functions.
  
  ### Comparing Tables
@@ -56,7 +56,7 @@ StudentDB = DataBase(StudentDBPath)
  The *AssessTables* function returns an instance of class *TableScore*.
  *TableScore* contains comparison values for elements of a table. The
  elements compared include primary keys, relationships (i.e. foreign 
- keys), field names, and more. The wiki documentation contains a complete 
+ keys), field names, and more. The [wiki documentation](https://github.com/mghaynes/cy305-py-dbutils/wiki) contains a complete 
  listing of available variables and functions.
  
  ### Scoring Tables
