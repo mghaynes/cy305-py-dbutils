@@ -969,6 +969,15 @@ def FindSubStatement(statement_list, substring):
         if substring in substatement:
             return substatement
 
+###  Used to check if two SQL queries are the same.
+###  query1: should be the SQL attribute from the Table class.
+###  string: the exact SQL string from the 'answer' with a SELECT
+###     FROM and WHERE on seperate lines. 
+def AssessStringQuery(query1, string):
+    SQL1_parts = query1.strip().strip().split('\r\n')
+    SQL2_parts = string.strip().split('\n')
+    return any(map(lambda x,y:y == x,SQL1_parts,SQL2_parts))
+
 
 def AssessQuery(query1, query2, debug=True):
     print('ASSESSING QUERY')
