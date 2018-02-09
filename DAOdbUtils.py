@@ -1,4 +1,7 @@
+
+
 # you'll need to import these libraries
+# pip install pypiwin32
 import win32com.client
 import Levenshtein
 import numpy as np
@@ -157,7 +160,7 @@ class Table:
                 self.RecordCount = self.QueryRecordCount()
         self.ColumnMetaData = self.GetColumnMetaData(table_meta)
         self.ColumnCount = len(self.ColumnMetaData)
-
+        
     def __str__(self):
         column_tuples = [(field.Name, field.Type, field.Size) for field in self.ColumnMetaData]
         if self.TableType == 'TABLE':
@@ -175,6 +178,14 @@ class Table:
         else:
             return ''
                 # self._rows = self.RowCount(self.debug)
+
+    def hasColumn(self, name):
+        column_meta = self.ColumnMetaData
+        found = False
+        for col in column_meta:
+            if name in col.Name:
+                return True
+        return False
 
     def QueryRecordCount(self):
         self._db = self._ws.OpenDatabase(self._dbPath)
@@ -1053,6 +1064,15 @@ def FindSubStatement(statement_list, substring):
     for substatement in statement_list:
         if substring in substatement:
             return substatement
+
+###  Used to check if two SQL queries are the same.
+###  query1: should be the SQL attribute from the Table class.
+###  string: the exact SQL string from the 'answer' with a SELECT
+###     FROM and WHERE on seperate lines. 
+def AssessStringQuery(query1, string):
+    SQL1_parts = query1.strip().strip().split('\r\n')
+    SQL2_parts = string.strip().split('\n')
+    return any(map(lambda x,y:y == x,SQL1_parts,SQL2_parts))
 
 
 def AssessQuery(query1, query2, debug=True):
