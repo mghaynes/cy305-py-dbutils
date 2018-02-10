@@ -362,6 +362,7 @@ base_table_weight = AssignTableWeights(NameScore=.05, FieldNameScore=.05, FieldT
                                       Correct_Num_Rltns=.025, Fld=.075, Rltd_Tbl=.1, Rltd_Fld=.1, Join=.025,
                                       Integrity=.075)
 
+
 # CLASS
 class QueryScore(collections.namedtuple('QueryScore',['SELECTscore', 'FROMscore', 'CRITERIAscore', 'GROUPBYscore',
                                                       'TOTALSscore', 'SORTscore', 'WHEREpenalty', 'HAVINGpenalty',
@@ -390,9 +391,6 @@ def AssignQueryWeights(SELECTscore=0, FROMscore=0, CRITERIAscore=0, GROUPBYscore
 base_query_weight = AssignQueryWeights(SELECTscore=0.2, FROMscore=0.2, CRITERIAscore=0.25, GROUPBYscore=0.125,
                                        TOTALSscore=0.125, SORTscore=0.1, WHEREpenalty=.1, HAVINGpenalty=.1,
                                        GROUPBYpenalty=.1, SORTpenalty=.1, MatchScore=0)
-
-
-
 
 
 # returns Lenvenshtein distance between a target string and a list of strings. (CURRENTLY NOT USED)
@@ -779,7 +777,7 @@ def AssessQueryFrom(soln_from_statement, student_from_statement, debug=True):
         from_report = ['\tFROM statements match\n']
     else:
         from_report = ['\tFROM statements DO NOT match\n\t\tSOLN rltnships: {}\n\t\tSTDNT rltnships: '
-                       '{}'.format(comp_results[1], student_relationships) + comp_results[2]]
+                       '{}'.format(comp_results[1], student_relationships) + comp_results[2] + '\n']
     return comp_results[0], from_report
 
 
@@ -814,18 +812,18 @@ def GetConditionalElements(statement):
 
 
 def BreakdownCriteriaStatement(full_statement):
-    num_elements = 0
+    num_elements = num_stmts = 0
     complete_elements_list = []
     for OR_line in full_statement.split(' OR '):
         AND_line = OR_line.split(' AND ')
         line_elements_list = []
         for AND_stmt in AND_line:
             base_elements_list = GetConditionalElements(AND_stmt)
-            # num_elements += len(base_elements_list)  # if want total count of elements
-            num_elements += 1 # if want total count of statements
+            num_elements += len(base_elements_list)
+            num_stmts += 1
             line_elements_list += [base_elements_list]
         complete_elements_list.append(line_elements_list)
-    return num_elements, complete_elements_list
+    return num_elements, num_stmts, complete_elements_list
 
 
 def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, debug=True):
@@ -835,7 +833,10 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
         print('SOLN HAVING:', soln_having)
         print('STUDENT WHERE:', student_where)
         print('STUDENT HAVING:', student_having)
-    extra_OR = extra_AND = 0
+    if soln_where == student_where and soln_having == student_having:
+        return 1, ['\tAND/OR statements match\n']
+    if student_where is None and student_having is None:
+        return 0, ['\tAND/OR statements DO NOT match\n\t\tNo STDNT AND/OR statmenet\n']
     # Stripping WHERE and HAVING statements (specific to way Access stores SQL statements)
     # Consider various situations
     if student_where is None and student_having is None:
@@ -872,84 +873,60 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
     # 'AND' indicates criteria in separate fields so second split on 'AND'
     # 'And' or 'Or' in indicates criteria on the same field, so look at those last
 
-    num_soln_elements, soln_elements_list = BreakdownCriteriaStatement(soln_stripped_stmt)
-    num_stdnt_elements, stdnt_elements_list = BreakdownCriteriaStatement(student_stripped_stmt)
-    # for permute in list(itertools.permutations(soln_elements_list, len(soln_elements_list))):
-    #     print(permute)
-    #     for cnt, row in enumerate(permute):
-    #         for cnt2, stmts in enumerate(itertools.permutations(row, len(row))):
-    #             print('\t', stmts)
-    #             num_matches, matches = GetNumberMatches(stmts, stdnt_elements_list[cnt][cnt2])
-
-
-
-
+    num_soln_elements, num_soln_stmts, soln_elements_list = BreakdownCriteriaStatement(soln_stripped_stmt)
+    num_stdnt_elements, num_stdnt_stmts, stdnt_elements_list = BreakdownCriteriaStatement(student_stripped_stmt)
+    final_list = []
+    extra_stmt = 0
+    for permute in list(itertools.permutations(stdnt_elements_list, len(stdnt_elements_list))):  #Permute student OR
+        # print('PERMUTE: ', permute)
+        permute_list = []
+        for cnt, row in enumerate(permute):
+            stmt_permute = []
+            for cnt2, stmts in enumerate(list(itertools.permutations(row, len(row)))):  # Permute student AND
+                # print('\tROW:', list(stmts))
+                stmt_permute.append(list(stmts))
+            permute_list.append(stmt_permute)
+        # print('Permute list:', permute_list)  # create list of permuted AND/OR combinations
+        final_list.append(list(itertools.product(*permute_list)))  # all combination taking one from each list
+    # print('PERMUTED LIST')
     if num_stdnt_elements > num_soln_elements:
-        extra_OR = num_stdnt_elements - num_soln_elements
-    # if len(student_OR) > len(soln_OR):
-    #     extra_OR = len(student_OR) - len(soln_OR)
-    # if debug:
-        # print()
-        # print('SOLN OR', soln_OR)
-        # print('STUDENT OR', student_OR)
-    ''' This code calculates number of elements in soln and student statements
-    # soln_AND = soln_stripped_stmt.split(' AND ')
-    # student_AND = student_stripped_stmt.split(' AND ')
-    # if len(student_AND) > len(soln_AND):
-    #     extra_AND = len(student_AND) - len(soln_AND)
-    '''
-    soln_OR = soln_stripped_stmt.split(' OR ')
-    student_OR = student_stripped_stmt.split(' OR ')
-    first_time_through_loop = first_time_through_stdnt_loop = True
-    criteria_score = num_criteria_items = 0
-    best_criteria_list = []
-    correct_criteria = []
-    student_criteria = []
-    for or2_criteria in student_OR:  # Loop through each student OR statement as its own line
-        # print('STUDENT ------- NEW LINE')
-        item2_AND = or2_criteria.split(' AND ')
-        and_score = 0
-        temp_criteria_list = []
-        for and2_criteria in item2_AND:  # loop through all the student ANDs on a given line
-            correct_stdnt_and_criteria = []
-            criteria2_items = GetConditionalElements(and2_criteria)
-            # print('Student criteria: {}'.format(criteria2_items))
-            if first_time_through_stdnt_loop:
-                num_criteria_items += len(criteria2_items)
-                correct_stdnt_and_criteria += [criteria2_items]
-            for or_criteria in soln_OR:  # Loop through each solution OR statement as its own line
-                item_AND = or_criteria.split(' AND ')
-                best_and_match = 0
-                correct_and_criteria = []
-                for and_criteria in item_AND:  # loop through all the solution ANDs on a given line
-                    criteria1_items = GetConditionalElements(and_criteria)
-                    if first_time_through_loop:
-                        num_criteria_items += len(criteria1_items)
-                        correct_and_criteria += [criteria1_items]
-                    num_matches, matches = GetNumberMatches(criteria1_items, criteria2_items)
-                    # print('\tCriteria Comparison: {}; Score: {}'.format(criteria1_items, num_matches))
-                    if num_matches > best_and_match:
-                        best_and_match = num_matches
-                        temp_criteria_list += [criteria2_items]
-                if first_time_through_loop:
-                    correct_criteria.append(correct_and_criteria)
-                and_score += best_and_match
-                # print('BEST AND MATCH: {}'.format(best_and_match))
-            first_time_through_loop = False
-        # print('\tAND SCORE: {}'.format(and_score))
-        if first_time_through_stdnt_loop:
-            student_criteria.append(correct_stdnt_and_criteria)
-        if and_score > criteria_score:
-            criteria_score = and_score
-            best_criteria_list += temp_criteria_list
-    if debug:
-        print('Correct Criteria List: {}'.format(correct_criteria))
-        print('Student Criteria List: {}'.format(student_criteria))
-        print('Best match: {}'.format(best_criteria_list))
-        print('Total # elements: {}'.format(num_criteria_items))
-        print('Closest match # elements: {}'.format(criteria_score))
-    final_criteria_score = (criteria_score/num_criteria_items) * (1-(too_many_penalty*(extra_AND+extra_OR)))
-    return final_criteria_score
+        extra_stmt = num_stdnt_elements - num_soln_elements
+    best_score = 0
+    best_match = ''
+    for item in final_list:
+        for item2 in item:
+            temp_score = 0
+            temp_list = []
+            # print(item2)
+            for cnt, item6 in enumerate(soln_elements_list):
+                # print('SOLN Element:', item6, '\nSTDNT Element:', item2[cnt])
+                if cnt + 1 <= len(item2):
+                    for cnt2, item7 in enumerate(item6):
+                        if cnt2+1 <= len(item2[cnt]):
+                            num_matches, matches = GetNumberMatches(item7, item2[cnt][cnt2])
+                            # print('MATCHES', matches, num_matches)
+                            temp_score += num_matches
+                            if num_matches > 0 and item2[cnt] not in temp_list:
+                                temp_list.append(item2[cnt])
+            if temp_score > best_score:
+                best_score = temp_score
+                best_match = temp_list
+            # for item3 in item2:
+            #     print(item3)
+                # for item4 in item3:
+                #     print(item4)
+                    # print(item6)
+    # print('BEST MATCH: {}\nBEST SCORE: {}'.format(best_match, best_score))
+
+    final_criteria_score = (best_score / num_soln_elements) * (1 - (too_many_penalty * (extra_stmt)))
+    if final_criteria_score >= 1:
+        criteria_report = ['\tAND/OR statements match\n']
+    else:
+        criteria_report = ['\tAND/OR statements DO NOT match\n\t\tSOLN criteria: {}\n\t\tSTDNT criteria: {}\n\t\tBest match'
+                       ': {}\n\t\tScore: {} Matching / {} Possible * {} Penalty = '
+                       '{}\n'.format(soln_elements_list, stdnt_elements_list, best_match, best_score,
+                                   num_soln_elements, (1 - (too_many_penalty * (extra_stmt))), final_criteria_score)]
+    return final_criteria_score, criteria_report
 
 
 '''                                     END CRITERIA ANALYSIS                                                       '''
@@ -1125,7 +1102,8 @@ def AssessQuery(query1, query2, debug=True):
     student_where = FindSubStatement(SQL2_parts, 'WHERE')
     student_having = FindSubStatement(SQL2_parts, 'HAVING')
     if soln_where is not None or soln_having is not None:  # If there is WHERE or HAVING in solution, assess
-        criteria_score = AssessQueryCriteria(soln_where, soln_having, student_where, student_having)
+        criteria_score, criteria_report = AssessQueryCriteria(soln_where, soln_having, student_where, student_having)
+        query_report += criteria_report
     if soln_where is None and student_where is not None:
         where_penalty = True  # Penalty for using WHERE when not supposed to
     if soln_having is None and student_having is not None:
