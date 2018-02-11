@@ -743,8 +743,9 @@ def CompareStuff(soln_compare, student_compare, num_choose, debug=True):
     for permute in itertools.permutations(soln_compare, num_choose):
         iter_score = 0
         for cnt, item in enumerate(student_compare):
-            score, matches = GetNumberMatches(permute[cnt], item, debug)
-            iter_score += score
+            if cnt+1 <= len(permute):
+                score, matches = GetNumberMatches(permute[cnt], item, debug)
+                iter_score += score
         if iter_score > best_comp_val:
             best_comp_val = iter_score
             best_comp = permute
@@ -756,7 +757,7 @@ def CompareStuff(soln_compare, student_compare, num_choose, debug=True):
         print('Best comparison: {}'.format(best_comp))
         print('Raw comparison score: {}\t# possible elements: {}\t'
               '# student elements: {}'.format(best_comp_val, possible_elements, student_elements))
-        print('Final FROM score: {}'.format(compare_ratio))
+        print('Final score: {}'.format(compare_ratio))
     return compare_ratio, best_comp, compare_report
 
 
@@ -933,7 +934,7 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
 '''-----------------------------------------------------------------------------------------------------------------'''
 
 # Checks for correct relationships in query
-def AssessQueryTotals(soln_totals, student_totals, debug=True):
+def AssessQueryTotalsFunctions(soln_totals, student_totals, debug=True):
     if debug:
         print('\n\tASSESSING TOTALS STATEMENT')
         print('SOLN: ', soln_totals)
@@ -969,8 +970,8 @@ def AssessQueryTotals(soln_totals, student_totals, debug=True):
         print('# Correct: {}\t# Select: {}'.format(np.size(soln_totals_elements), np.size(best_match)))
     # penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_select_elements, student_select_elements)
     # compare_ratio = (select_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
-    return compare_ratio
-
+    # return compare_ratio
+    return soln_totals_elements, student_totals_elements, best_match
 
 # NOTE: This function is almsot verbatim same as AssessQuerySelect function; consider combining for efficiency?
 def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
@@ -980,26 +981,63 @@ def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
         print('STUDENT: ', student_groupby)
     if student_groupby is None:
         return 0
-    # Stripping SELECT statement (this is specific to way Access stores as 'SELECT x, y,x\r'
+    # Stripping GROUP BY statement'
     soln_fields = soln_groupby.strip('\r').split('GROUP BY ')[1].split(', ')
     student_fields = student_groupby.strip('\r').split('GROUP BY ')[1].split(', ')
     # Split elements on '.' (Access puts table on left of '.' and field name on right)
     soln_groupby_elements = []
     student_groupby_elements = []
+    soln_display_groupby = []
+    stdnt_display_groupby = []
     for compound_field in soln_fields:
         soln_groupby_elements += GetFieldsFromCompoundField(compound_field)
+        soln_display_groupby += [['GROUP BY'] + GetFieldsFromCompoundField(compound_field)]
     for compound_field in student_fields:
         student_groupby_elements += GetFieldsFromCompoundField(compound_field)
+        stdnt_display_groupby += [['GROUP BY'] + GetFieldsFromCompoundField(compound_field)]
     # Check to see how many field,table matches between two queries
     groupby_cnt, matches = GetNumberMatches(soln_groupby_elements, student_groupby_elements, debug)
+    compare_ratio, best_match, report = CompareStuff(soln_display_groupby, stdnt_display_groupby,
+                                                     len(soln_display_groupby), False)
     if debug:
-        print('Solution group by: {}'.format(soln_groupby_elements))
-        print('Student group by: {}'.format(student_groupby_elements))
-        print('Matches: {}'.format(matches))
-        print('# Correct: {}\t# Groupby: {}'.format(groupby_cnt, len(soln_groupby_elements)))
-    penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_groupby_elements, student_groupby_elements)
-    compare_ratio = (groupby_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
-    return compare_ratio
+        print('Solution group by: {}'.format(soln_display_groupby))
+        print('Student group by: {}'.format(stdnt_display_groupby))
+        print('Best Match: {}'.format(best_match))
+        print('# Correct: {}\t# Groupby: {}'.format(np.size(best_match), np.size(soln_display_groupby)))
+    # penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_groupby_elements, student_groupby_elements)
+    # compare_ratio = (groupby_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
+    # return compare_ratio
+    return soln_display_groupby, stdnt_display_groupby, best_match
+
+def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select):
+    if soln_select == student_select and soln_groupby == student_groupby:
+        return 1, ['\tTOTALS functions match\n']
+    totals_score = 0
+    totals_report = ''
+    soln_groupby_elements = soln_totals_elements = best_groupby = best_totals = []
+    groupby_penalty = False
+    if soln_groupby is not None:  # If there is a GROUP BY in solution
+        soln_groupby_elements, stdnt_groupby_elements, best_groupby = AssessQueryGroupby(soln_groupby, student_groupby)
+    if '(' in soln_select or ')' in soln_select:  # If there is a totals function in solution
+        soln_totals_elements, stdnt_totals_elements, best_totals = AssessQueryTotalsFunctions(soln_select,
+                                                                                                student_select)
+    num_matches = np.size(best_groupby) + np.size(best_totals)
+    num_possible = np.size(soln_groupby_elements) + np.size(soln_totals_elements)
+    if len(soln_groupby_elements) > 0 or len(soln_totals_elements) > 0:
+        totals_score = num_matches / num_possible
+    # extra_stmts = np.size(soln_groupby_elements) + np.size(soln_totals_elements) - np.size(stdnt_groupby_elements) - \
+    #               np.size(stdnt_totals_elements)  # not using so don't penalize twice (already penalized in select)
+    if totals_score == 1:
+        totals_report = ['\tTOTALS functions match\n']
+
+    else:
+        totals_report = ['\tTOTALS functions DO NOT match\n']
+    totals_report[0] += '\t\tSOLN totals: {}\n\t\tSTDNT totals: {}\n\t\tBest match: {}\n\t\tScore: {} Matching / {} ' \
+                        'Possible = {}\n\t\tNote -- No penalty for extra elements, since penalized in SELECT analysis' \
+                        '.\n'.format(soln_groupby_elements+soln_totals_elements,
+                                     stdnt_groupby_elements+stdnt_totals_elements, best_groupby+best_totals, num_matches,
+                                     num_possible, totals_score)
+    return totals_score, totals_report
 
 
 # Need to add something for ascending vs descending
@@ -1008,31 +1046,53 @@ def AssessQuerySort(soln_sort, student_sort, debug=True):
         print('\n\tASSESSING SORT')
         print('Soln Sort:', soln_sort)
         print('Student Sort:', student_sort)
+    if soln_sort == student_sort:
+        return 1, ['\tORDER BY statements match\n']
     if student_sort is None:
-        return 0
+        return 0, ['\tORDER BY statements DO NOT match\n\t\tNo STDNT ORDER BY statmenet\n']
     sort_score = order_score = direction_score = 0
     soln_sort = CleanStatement(soln_sort)
     student_sort = CleanStatement(student_sort)
     # Stripping ORDER BY statement (specific to way Access stores SQL statements)
     soln_stripped_sort = soln_sort.strip(';').split('ORDER BY ')[1].split(', ')
     student_stripped_sort = student_sort.strip(';').split('ORDER BY ')[1].split(', ')
-    print(soln_stripped_sort)
-    print(student_stripped_sort)
+    first_time_through_loop = True
+    all_soln_elements = []
+    all_stdnt_elements = []
     for cnt, soln_field in enumerate(soln_stripped_sort):
         soln_elements = soln_field.split(' DESC')
+        if len(soln_elements) > 1:
+            soln_elements[1] = 'DESC'
+        all_soln_elements.append(soln_elements)
         for cnt2, student_field in enumerate(student_stripped_sort):
             student_elements = student_field.split(' DESC')
+            if len(student_elements) > 1:
+                student_elements[1] = 'DESC'
+            if first_time_through_loop:
+                all_stdnt_elements.append(student_elements)
+            # print('Stdnts', student_elements)
             if soln_elements[0] in student_elements[0]:
                 sort_score += 1
                 if cnt == cnt2:
                     order_score += 1
                 if len(soln_elements) == len(student_elements):
                     direction_score += 1
+        first_time_through_loop = False
+    if debug:
+        print('SOLN elements:', all_soln_elements)
+        print('STDNT elements:', all_stdnt_elements)
     num_elements = len(soln_stripped_sort)
     if debug:
         print('Fields Score: {}\nOrder score: {}\nDirection score: {}'.format(sort_score, order_score, direction_score))
     final_score = (sort_score + order_score + direction_score) / num_elements / 3
-    return final_score
+    if final_score >= 1:
+        return 1, ['\tORDER BY statements match\n']
+    else:
+        report = ['\tORDER BY statements DO NOT match\n\t\tSOLN ordering: {}\n\t\tSTDNT ordering" {}\n\t\tSort fields: '
+                  '{} / {}\tSort direction: {} / {}\tField ordering: {} / {}\n\t\tSort score: '
+                  '{}'.format(all_soln_elements, all_stdnt_elements, sort_score, num_elements, direction_score,
+                              num_elements, order_score, num_elements, final_score)]
+        return final_score, report
 
 
 def FindSubStatement(statement_list, substring):
@@ -1085,7 +1145,7 @@ def AssessQuery(query1, query2, debug=True):
     # Assess the 'SELECT' statement
     soln_select = FindSubStatement(SQL1_parts, 'SELECT')
     student_select = FindSubStatement(SQL2_parts, 'SELECT')
-    if soln_select is not None: # If there is a SELECT in solution
+    if soln_select is not None:  # If there is a SELECT in solution
         select_score, select_report = AssessQuerySelect(soln_select, student_select)
         query_report += select_report
 
@@ -1112,18 +1172,18 @@ def AssessQuery(query1, query2, debug=True):
     # Assess 'GROUPBY' and Totals functions
     soln_groupby = FindSubStatement(SQL1_parts, 'GROUP BY')
     student_groupby = FindSubStatement(SQL2_parts, 'GROUP BY')
-    if soln_groupby is not None:  # If there is a GROUP BY in solution
-        groupby_score = AssessQueryGroupby(soln_groupby, student_groupby)
-    if '(' in soln_select or ')' in soln_select:
-        totals_score = AssessQueryTotals(soln_select, student_select)
+    totals_score, totals_report = AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select)
     if (soln_groupby is None and student_groupby is not None) or ('(' not in soln_select and '(' in student_select):
         groupby_penalty = True  # Penalty for using totals functions when not supposed to
+    if len(totals_report) > 0:
+        query_report += totals_report
 
     # Assess 'SORT'
     soln_sort = FindSubStatement(SQL1_parts, 'ORDER')
     student_sort = FindSubStatement(SQL2_parts, 'ORDER')
     if soln_sort is not None:  # If there is ORDER in solution, assess
-            sort_score = AssessQuerySort(soln_sort, student_sort)
+            sort_score, sort_report = AssessQuerySort(soln_sort, student_sort)
+            query_report += sort_report
     if soln_sort is None and student_sort is not None:
         pass  # Penalty for sorting when not supposed to
 
@@ -1180,9 +1240,9 @@ def main():
     print('Comparing "SoldierCompletesTraining" tables...')
     print(table_assessment)
     print('\nFinal Table Score: ', ScoreTable(table_assessment))
-    query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
+    # query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
-    # query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
+    query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
