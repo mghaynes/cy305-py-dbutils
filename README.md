@@ -5,7 +5,8 @@ Microsoft Access files (.accdb).
 
 The basic idea of the utility is to compare two database objects (tables or
  queries) against each other. The utility can also return a grade based on
- results of a comparison.
+ results of a comparison. The utility also works as a stand alone allowing
+ you to access all the properties of a table, query, or field.
  
 The main utility is **DAOdbUtils.py**. This module only works on Windows OS.
 An older version named **dbUtils.py** is OS independent. However, it is not

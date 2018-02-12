@@ -1014,14 +1014,19 @@ def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, 
         return 1, ['\tTOTALS functions match\n']
     totals_score = 0
     totals_report = ''
-    soln_groupby_elements = soln_totals_elements = best_groupby = best_totals = []
-    groupby_penalty = False
+    soln_groupby_elements = soln_totals_elements = stdnt_groupby_elements = stdnt_totals_elements = \
+        best_groupby = best_totals = []
+    groupby_penalty = totals_functions_exist = False
     if soln_groupby is not None:  # If there is a GROUP BY in solution
         soln_groupby_elements, stdnt_groupby_elements, best_groupby = AssessQueryGroupby(soln_groupby, student_groupby,
                                                                                          debug)
+        totals_functions_exist = True
     if '(' in soln_select or ')' in soln_select:  # If there is a totals function in solution
         soln_totals_elements, stdnt_totals_elements, best_totals = AssessQueryTotalsFunctions(soln_select,
                                                                                                 student_select, debug)
+        totals_functions_exist = True
+    if not totals_functions_exist:
+        return 0, ''
     num_matches = np.size(best_groupby) + np.size(best_totals)
     num_possible = np.size(soln_groupby_elements) + np.size(soln_totals_elements)
     if len(soln_groupby_elements) > 0 or len(soln_totals_elements) > 0:
@@ -1154,7 +1159,7 @@ def AssessQuery(query1, query2, debug=False):
     # Assess the 'FROM' statement
     soln_from = FindSubStatement(SQL1_parts, 'FROM')
     student_from = FindSubStatement(SQL2_parts, 'FROM')
-    if soln_from is not None:  # Always a FROM in correct solution, so check to see if a student FROM
+    if soln_from is not None:  # If there is a FROM in solution
         from_score, from_report = AssessQueryFrom(soln_from, student_from, debug)
         query_report += from_report
 
@@ -1245,9 +1250,9 @@ def main():
     # print(table_assessment)
     print(''.join(report))
     print('\nFinal Table Score: ', ScoreTable(table_assessment))
-    # query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
+    query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
-    query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'],debug=False)
+    # query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'],debug=False)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
