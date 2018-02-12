@@ -1009,7 +1009,7 @@ def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
     # return compare_ratio
     return soln_display_groupby, stdnt_display_groupby, best_match
 
-def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select):
+def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, debug=True):
     if soln_select == student_select and soln_groupby == student_groupby:
         return 1, ['\tTOTALS functions match\n']
     totals_score = 0
@@ -1017,10 +1017,11 @@ def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select):
     soln_groupby_elements = soln_totals_elements = best_groupby = best_totals = []
     groupby_penalty = False
     if soln_groupby is not None:  # If there is a GROUP BY in solution
-        soln_groupby_elements, stdnt_groupby_elements, best_groupby = AssessQueryGroupby(soln_groupby, student_groupby)
+        soln_groupby_elements, stdnt_groupby_elements, best_groupby = AssessQueryGroupby(soln_groupby, student_groupby,
+                                                                                         debug)
     if '(' in soln_select or ')' in soln_select:  # If there is a totals function in solution
         soln_totals_elements, stdnt_totals_elements, best_totals = AssessQueryTotalsFunctions(soln_select,
-                                                                                                student_select)
+                                                                                                student_select, debug)
     num_matches = np.size(best_groupby) + np.size(best_totals)
     num_possible = np.size(soln_groupby_elements) + np.size(soln_totals_elements)
     if len(soln_groupby_elements) > 0 or len(soln_totals_elements) > 0:
@@ -1112,8 +1113,9 @@ def AssessStringQuery(query1, string):
     return any(map(lambda x,y:y == x,SQL1_parts,SQL2_parts))
 
 
-def AssessQuery(query1, query2, debug=True):
-    print('ASSESSING QUERY')
+def AssessQuery(query1, query2, debug=False):
+    if debug:
+        print('ASSESSING QUERY')
     row_count_score = exact_rec_score = select_score = from_score = criteria_score \
                     = groupby_score = totals_score = sort_score = 0
     where_penalty = having_penalty = groupby_penalty = sort_penalty = False
@@ -1146,14 +1148,14 @@ def AssessQuery(query1, query2, debug=True):
     soln_select = FindSubStatement(SQL1_parts, 'SELECT')
     student_select = FindSubStatement(SQL2_parts, 'SELECT')
     if soln_select is not None:  # If there is a SELECT in solution
-        select_score, select_report = AssessQuerySelect(soln_select, student_select)
+        select_score, select_report = AssessQuerySelect(soln_select, student_select, debug)
         query_report += select_report
 
     # Assess the 'FROM' statement
     soln_from = FindSubStatement(SQL1_parts, 'FROM')
     student_from = FindSubStatement(SQL2_parts, 'FROM')
     if soln_from is not None:  # Always a FROM in correct solution, so check to see if a student FROM
-        from_score, from_report = AssessQueryFrom(soln_from, student_from)
+        from_score, from_report = AssessQueryFrom(soln_from, student_from, debug)
         query_report += from_report
 
     # Assess 'WHERE' and 'HAVING' criteria
@@ -1162,7 +1164,8 @@ def AssessQuery(query1, query2, debug=True):
     student_where = FindSubStatement(SQL2_parts, 'WHERE')
     student_having = FindSubStatement(SQL2_parts, 'HAVING')
     if soln_where is not None or soln_having is not None:  # If there is WHERE or HAVING in solution, assess
-        criteria_score, criteria_report = AssessQueryCriteria(soln_where, soln_having, student_where, student_having)
+        criteria_score, criteria_report = AssessQueryCriteria(soln_where, soln_having, student_where, student_having,
+                                                              debug)
         query_report += criteria_report
     if soln_where is None and student_where is not None:
         where_penalty = True  # Penalty for using WHERE when not supposed to
@@ -1172,7 +1175,7 @@ def AssessQuery(query1, query2, debug=True):
     # Assess 'GROUPBY' and Totals functions
     soln_groupby = FindSubStatement(SQL1_parts, 'GROUP BY')
     student_groupby = FindSubStatement(SQL2_parts, 'GROUP BY')
-    totals_score, totals_report = AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select)
+    totals_score, totals_report = AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, debug)
     if (soln_groupby is None and student_groupby is not None) or ('(' not in soln_select and '(' in student_select):
         groupby_penalty = True  # Penalty for using totals functions when not supposed to
     if len(totals_report) > 0:
@@ -1182,15 +1185,16 @@ def AssessQuery(query1, query2, debug=True):
     soln_sort = FindSubStatement(SQL1_parts, 'ORDER')
     student_sort = FindSubStatement(SQL2_parts, 'ORDER')
     if soln_sort is not None:  # If there is ORDER in solution, assess
-            sort_score, sort_report = AssessQuerySort(soln_sort, student_sort)
+            sort_score, sort_report = AssessQuerySort(soln_sort, student_sort, debug)
             query_report += sort_report
     if soln_sort is None and student_sort is not None:
         pass  # Penalty for sorting when not supposed to
 
-    print('\nSELECT score: {}\nFROM score: {}\nWHERE/HAVING score: {}\nGROUP BY score: {}\nTOTALS score: {}'
+    if debug:
+        print('\nSELECT score: {}\nFROM score: {}\nWHERE/HAVING score: {}\nGROUP BY score: {}\nTOTALS score: {}'
           '\nSORT score: {}'.format(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score))
-    print('\n{}'.format(query1.SQL))
-    print(query2.SQL)
+        print('\n{}'.format(query1.SQL))
+        print(query2.SQL)
     query_results = QueryScore(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score, \
            where_penalty, having_penalty, groupby_penalty, sort_penalty, exact_rec_score)
     if debug:
@@ -1238,19 +1242,20 @@ def main():
     # table_assessment = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'])
     print()
     print('Comparing "SoldierCompletesTraining" tables...')
-    print(table_assessment)
+    # print(table_assessment)
+    print(''.join(report))
     print('\nFinal Table Score: ', ScoreTable(table_assessment))
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
-    query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
+    query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'],debug=False)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
     print()
+    print(''.join(q_report))
     print('\nFinal Query Score: ', ScoreQuery(query_assessment))
-    print(query_assessment)
 
 if __name__ == "__main__":
     main()
