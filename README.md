@@ -52,13 +52,19 @@ StudentDB = DataBase(StudentDBPath)
  The second parameter will be compared against the first parameter.
  Example:
  ```python
- table_assessment = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'])
+ table_assessment, report = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'])
  ```
- The *AssessTables* function returns an instance of class *TableScore*.
+ The *AssessTables* function returns an instance of class *TableScore* and a report in the
+  form of a list of stirngs.
+   
  *TableScore* contains comparison values for elements of a table. The
  elements compared include primary keys, relationships (i.e. foreign 
  keys), field names, and more. The [wiki documentation](https://github.com/mghaynes/cy305-py-dbutils/wiki) contains a complete 
  listing of available variables and functions.
+ 
+ The output report contains information on the results of comparing the two tables. For each compared
+ element, it contains whether or not the two tables matched. And, if they did not match, it reports on
+ the difference between the elements, and the ratio assigned for that element.
  
  ### Scoring Tables
  Scoring is based on weighting each of the fields in the *TableScore* 
