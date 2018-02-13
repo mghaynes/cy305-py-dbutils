@@ -3,7 +3,7 @@
 # you'll need to import these libraries
 # pip install pypiwin32
 import win32com.client
-import Levenshtein
+# import distance
 import numpy as np
 # these are built in to python
 import collections
@@ -46,8 +46,9 @@ class DataBase:
         self.TableNames = self.TableList(debug=self._debug)
         self.QueryNames = self.TableList(isTable=False, debug=self._debug)
         self.Relationships = self.GetRelationships(debug=self._debug)
-        self.Tables = self.LoadTables(self.TableNames)
-        self.Queries = self.LoadTables(self.QueryNames, isTable=False)
+        self.Tables = self.LoadTables(self.TableNames, debug=self._debug)
+        self.Queries = self.LoadTables(self.QueryNames, isTable=False, debug=self._debug)
+        # self._db.Close()
 
     # For query list, isTable must be False
     def TableList(self, isTable=True, debug=0):
@@ -68,7 +69,7 @@ class DataBase:
         return table_list
 
 
-    def LoadTables(self, table_list, isTable=True):
+    def LoadTables(self, table_list, isTable=True, debug=0):
         tables = {}
         for table in table_list:
             if isTable:
@@ -130,9 +131,6 @@ class DataBase:
         return relationships
 
 
-'''---------------------------------------------- END DATABASE CLASS ------------------------------------------------'''
-
-
 '''-----------------------------------------------------------------------------------------------------------------'''
 '''                                               CLASS: TABLE                                                      '''
 ''' DataBase class permits various operations on tables/queries to include getting records, SQL, lookups, keys,     '''
@@ -156,8 +154,9 @@ class Table:
         else:
             self.TableType = 'QUERY'
             self.SQL = self.GetSQL(table_meta)
-            if dbPath != None:
-                self.RecordCount = self.QueryRecordCount()
+            self.RecordCount = None
+            # if dbPath != None:
+            #     self.RecordCount = self.QueryRecordCount()
         self.ColumnMetaData = self.GetColumnMetaData(table_meta)
         self.ColumnCount = len(self.ColumnMetaData)
         
@@ -192,6 +191,7 @@ class Table:
         num_rows = self._db.OpenRecordset(self.Name).RecordCount
         self._db.Close()
         return num_rows
+
 
 
     # returns the names of the columns in a table
@@ -396,17 +396,17 @@ base_query_weight = AssignQueryWeights(SELECTscore=0.2, FROMscore=0.2, CRITERIAs
 # returns Lenvenshtein distance between a target string and a list of strings. (CURRENTLY NOT USED)
 # VARIABLE: Target  TYPE: String
 # VARIABLE: Options TYPE: List (with elements being strings)
-def BestMatch(target, options):
-    best_distance = float("inf")
-    best_option = ''
-    for option in options:
-        distance = Levenshtein.distance(target, option)
-        if distance == best_distance:
-            print("In BestMatch have two options with same Levenshtein distance. Check it out")
-        if distance < best_distance:
-            best_distance = distance
-            best_option = option
-    return best_distance, best_option
+# def BestMatch(target, options):
+#     best_distance = float("inf")
+#     best_option = ''
+#     for option in options:
+#         distance = Levenshtein.distance(target, option)
+#         if distance == best_distance:
+#             print("In BestMatch have two options with same Levenshtein distance. Check it out")
+#         if distance < best_distance:
+#             best_distance = distance
+#             best_option = option
+#     return best_distance, best_option
 
 
 def ListProperties(object):
@@ -417,7 +417,7 @@ def ListProperties(object):
             print(property.Name)
 
 
-def GradeRelationships(rltn_dict1, rltn_dict2):
+def GradeRelationships(rltn_dict1, rltn_dict2, debug=False):
     correct_num_rltns = fld = rltd_fld = rltd_tbl = join = integrity = 0
     # if no relationships then return all 1s
     if rltn_dict1 == '':
@@ -438,7 +438,8 @@ def GradeRelationships(rltn_dict1, rltn_dict2):
             for field1 in rltn_dict1[rltd_tbl1_key]:
                 if field1 in rltn_dict2[rltd_tbl1_key]:
                     fld += 1
-                    print(field1)
+                    if debug:
+                        print(field1)
                     rltn1 = rltn_dict1[rltd_tbl1_key][field1]
                     rltn2 = rltn_dict2[rltd_tbl1_key][field1]
                     if rltn1.RelatedField == rltn2.RelatedField:
@@ -452,28 +453,41 @@ def GradeRelationships(rltn_dict1, rltn_dict2):
     rltd_fld /= num_rltns
     join /= num_rltns
     integrity /= num_rltns
-    print('related field:{}\njoin:{}\nintegrity:{}'.format(rltd_fld, join, integrity))
+    if debug:
+        print('related field:{}\njoin:{}\nintegrity:{}'.format(rltd_fld, join, integrity))
     return correct_num_rltns, fld, rltd_tbl, rltd_fld, join, integrity
 
 
-def ExactRecordsMatch(table1_recs, table2_recs):
-    exact_rec_score = 4
-    # check exact table match (i.e. row,col values all match)
-    for cnt, row in enumerate(table1_recs):
-        if exact_rec_score == 4:
+def ExactRecordsMatch(table1, table2):
+    if table1.RecordCount == table2.RecordCount:
+        table1_recs = table1.GetRecords()
+        table2_recs = table2.GetRecords()
+        # check exact table match (i.e. row,col values all match)
+        for cnt, row in enumerate(table1_recs):
             if row != table2_recs[cnt]:
-                exact_rec_score = 3
-        # check row values match (i.e. col order doesn't matter) (allows for extra columns)
-        if exact_rec_score == 3:
-            if set(row).intersection(table2_recs[cnt]) != set(row):
-                return 2
-    return exact_rec_score
+                return 0
+    else:
+        return 0
+    return 1
 
-def AssessTableEntries(table1, table2):
+
+def AssessTableEntries(table1, table2, quick_answer=False):
     table1_recs = table1.GetRecords()
     table2_recs = table2.GetRecords()
-    exact_rec_score = ExactRecordsMatch(table1_recs, table2_recs)
+    if len(table1_recs) != len(table2_recs):
+        return 0
+    exact_rec_score = 4
     # check out of order exact records match (i.e. rows out of order, but col order still matters)
+    for cnt, row in enumerate(table1_recs):
+        if exact_rec_score == 4 and row != table2_recs[cnt]:
+            exact_rec_score = 3
+        row_set = set(row)
+        if exact_rec_score == 3 and len(row_set.intersection(table2_recs[cnt])) != len(row_set):
+            exact_rec_score == 2
+    if quick_answer:
+        if exact_rec_score == 2:
+            return 0
+        return exact_rec_score
     if exact_rec_score == 2:
         for row in table1_recs:
             if row not in table2_recs:
@@ -496,7 +510,7 @@ def AssessTableEntries(table1, table2):
 # Note: Table1 should be the 'correct' table/query. Table 2 is compared against Table 1.
 # The scores are returned as percentages. For example, if you had 2 of 3 primary keys correct the
 # score returned is 0.67 (this makes it easier to multiply by whatever rubric you want to use)
-def AssessTables(table1, table2):
+def AssessTables(table1, table2, compare_records = True):
     global too_many_penalty
     name_score = row_count_score = col_count_score = field_name_score = field_type_score = field_size_score = \
         exact_rec_score = excess_fields = 0
@@ -559,12 +573,13 @@ def AssessTables(table1, table2):
     else:
         score_report += ['\t-Relationships DO NOT match\n\t\tSoln: {}\n\t\tStdnt: {}\n'.format(table1.ForeignKeys,
                                                                                             table2.ForeignKeys)]
-    if row_count_score:
-        exact_rec_score = AssessTableEntries(table1, table2)
-    if exact_rec_score:
-        score_report += ['\t-Records match\n']
-    else:
-        score_report += ['\t-Records DO NOT match']
+    if compare_records:
+        if row_count_score:
+            exact_rec_score = AssessTableEntries(table1, table2)
+        if exact_rec_score:
+            score_report += ['\t-Records match\n']
+        else:
+            score_report += ['\t-Records DO NOT match']
     exact_rec_score /= 4
     table_score = TableScore(name_score, row_count_score, col_count_score, field_name_score, field_type_score,
                              field_size_score, exact_rec_score, pk_same, pk_diff, correct_num_rltns, fld, rltd_tbl,
@@ -665,20 +680,20 @@ def AssessQuerySelect(soln_select, student_select, debug=True):
     # Check to see how many field,table matches between two queries
     select_cnt, matches = GetNumberMatches(soln_select_elements, student_select_elements, debug)
     penalty_factor, num_elements, student_elements = GetPenaltyMultiple(soln_select_elements, student_select_elements)
-    compare_ratio = (select_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
-    select_report = []
-    if compare_ratio >= 1:
-        select_report += ['\tSELECT statements match\n']
+    penalty_factor /= 2
+    select_score = (select_cnt / num_elements) * (1 - penalty_factor)  # penalty for choosing too much stuff
+    if select_score >= 1:
+        select_report = ['\tSELECT statements match\n']
     else:
-        select_report += ['\tSELECT statements DO NOT match\n\t\tSOLN Select: {}\n\t\tSTDNT Select: {}\n\t\tMatching '
-                          'elements: {}\n\t\tScore: {} Matches / {} Possible * {} Penalty Factor '
-                          '= {}\n'.format(soln_select_elements, student_select_elements, matches, select_cnt,
-                                          len(soln_select_elements), (1-penalty_factor), compare_ratio)]
-    return compare_ratio, select_report
+        select_report = ['\tSELECT statements DO NOT match\n\t\tSOLN Select: {}\n\t\tSTDNT Select: {}\n\t\tMatching '
+                         'elements: {}\n\t\tSelect Score = {:.1f}% ({} Matches / {} Possible * {:.1f}% Extra field'
+                         ' penalty)\n'.format(soln_select_elements, student_select_elements, matches, select_score*100,
+                                              select_cnt, len(soln_select_elements), penalty_factor*100)]
+    return select_score, select_report
 
 
-'''                                     END FROM STATEMENT ANALYSIS                                                 '''
-'''-----------------------------------------------------------------------------------------------------------------'''
+'''                                     END SELECT STATEMENT ANALYSIS                                                '''
+'''----------------------------------------------------------------------------_-------------------------------------'''
 
 
 '''-----------------------------------------------------------------------------------------------------------------'''
@@ -742,23 +757,19 @@ def CompareStuff(soln_compare, student_compare, num_choose, debug=True):
     #     student_elements += len(item)
     for permute in itertools.permutations(soln_compare, num_choose):
         iter_score = 0
+        permute_matches = []
         for cnt, item in enumerate(student_compare):
             if cnt+1 <= len(permute):
                 score, matches = GetNumberMatches(permute[cnt], item, debug)
                 iter_score += score
+                permute_matches.append(matches)
         if iter_score > best_comp_val:
             best_comp_val = iter_score
-            best_comp = permute
-    penalty_factor, possible_elements, student_elements = GetPenaltyMultiple(soln_compare, student_compare)
-    compare_ratio = (best_comp_val / possible_elements) * (1-penalty_factor)  # penalty for choosing too much stuff
-    compare_report = '\n\t\tScore: {} Matches / {} Possible * {} Penalty = {}'.format(best_comp_val, possible_elements,
-                                                                               1-penalty_factor, compare_ratio)
+            best_comp = permute_matches
     if debug:
         print('Best comparison: {}'.format(best_comp))
-        print('Raw comparison score: {}\t# possible elements: {}\t'
-              '# student elements: {}'.format(best_comp_val, possible_elements, student_elements))
-        print('Final score: {}'.format(compare_ratio))
-    return compare_ratio, best_comp, compare_report
+        print('Raw comparison score: {}'.format(best_comp_val))
+    return best_comp, best_comp_val
 
 
 # The SQL FROM statement shows which tables were used in the query and the relationship between those tables
@@ -773,17 +784,18 @@ def AssessQueryFrom(soln_from_statement, student_from_statement, debug=True):
         return 0, ['\tFROM statements DO NOT match\n\t\tNo STDNT FROM statmenet\n']
     soln_relationships = BreakdownQueryFromStmt(soln_from_statement, debug)
     student_relationships = BreakdownQueryFromStmt(student_from_statement, debug)
-    comp_results = CompareStuff(soln_relationships, student_relationships, len(soln_relationships), debug)
-    if comp_results[0] >= 1:
+    best_comp, best_comp_score = CompareStuff(soln_relationships, student_relationships, len(soln_relationships), debug)
+    penalty_factor, possible_elements, student_elements = GetPenaltyMultiple(soln_relationships, student_relationships)
+    from_score = (best_comp_score / possible_elements) * (1-penalty_factor)
+    from_score_report = '\n\t\tFrom score = {:.1f}% ({} Matches / {} Possible * {:.1f}% Extra stmt penalty' \
+                        ')'.format(from_score*100, best_comp_score, possible_elements, penalty_factor*100)
+
+    if from_score >= 1:
         from_report = ['\tFROM statements match\n']
     else:
-        from_report = ['\tFROM statements DO NOT match\n\t\tSOLN rltnships: {}\n\t\tSTDNT rltnships: '
-                       '{}'.format(comp_results[1], student_relationships) + comp_results[2] + '\n']
-    return comp_results[0], from_report
-
-
-'''                                     END FROM STATEMENT ANALYSIS                                                 '''
-'''-----------------------------------------------------------------------------------------------------------------'''
+        from_report = ['\tFROM statements DO NOT match\n\t\tSOLN rltnships: {}\n\t\tSTDNT rltnships: {}\n\t\tBest match'
+                       ': {}'.format(soln_relationships, student_relationships, best_comp) + from_score_report + '\n']
+    return from_score, from_report
 
 
 '''-----------------------------------------------------------------------------------------------------------------'''
@@ -802,10 +814,12 @@ def GetConditionalElements(statement):
         if symbol in statement:
             temp_elements = statement.split(symbol)  # split statement on symbol
             if len(temp_elements) > 1:
-                for cnt in range(len(temp_elements) - 1):
-                    elements.append(symbol)  # append as many symbols as appear in statement
+                # for cnt in range(len(temp_elements) - 1):
+                #     elements.append(symbol)  # append as many symbols as appear in statement
                 for element in temp_elements:
                     elements += GetConditionalElements(element)  # recursively call function on each substatement
+                    elements.append(symbol)  # add symbol after each element (since split on symbol)
+                elements = elements[:-1]  # remove last symbol (appended after last elements so extra)
             break  # if found a symbol exit loop to prevent duplicates
     if not elements and statement:  # if elements list is empty and statement is not empty, add operand to list
         elements.append(statement)
@@ -890,10 +904,10 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
         # print('Permute list:', permute_list)  # create list of permuted AND/OR combinations
         final_list.append(list(itertools.product(*permute_list)))  # all combination taking one from each list
     # print('PERMUTED LIST')
-    if num_stdnt_elements > num_soln_elements:
-        extra_stmt = num_stdnt_elements - num_soln_elements
+    if num_stdnt_stmts > num_soln_stmts:
+        extra_stmt = num_stdnt_stmts - num_soln_stmts
     best_score = 0
-    best_match = ''
+    best_match = []
     for item in final_list:
         for item2 in item:
             temp_score = 0
@@ -923,10 +937,11 @@ def AssessQueryCriteria(soln_where, soln_having, student_where, student_having, 
     if final_criteria_score >= 1:
         criteria_report = ['\tAND/OR statements match\n']
     else:
-        criteria_report = ['\tAND/OR statements DO NOT match\n\t\tSOLN criteria: {}\n\t\tSTDNT criteria: {}\n\t\tBest match'
-                       ': {}\n\t\tScore: {} Matching / {} Possible * {} Penalty = '
-                       '{}\n'.format(soln_elements_list, stdnt_elements_list, best_match, best_score,
-                                   num_soln_elements, (1 - (too_many_penalty * (extra_stmt))), final_criteria_score)]
+        criteria_report = ['\tAND/OR statements DO NOT match\n\t\tSOLN criteria: {}\n\t\tSTDNT criteria: {}\n\t\tBest '
+                           'match: {}\n\t\tCriteria score = {:.1f}% ({} Matches / {} Possible * {:.1f}% Extra statment '
+                           'penalty)\n'.format(soln_elements_list, stdnt_elements_list, best_match,
+                                               final_criteria_score*100, best_score, num_soln_elements,
+                                               too_many_penalty*extra_stmt*100)]
     return final_criteria_score, criteria_report
 
 
@@ -962,7 +977,7 @@ def AssessQueryTotalsFunctions(soln_totals, student_totals, debug=True):
     # Check to see how many field,table matches between two queries
     # select_cnt, matches = GetNumberMatches(soln_select_elements, student_select_elements, debug)
     num_totals = len(soln_totals_elements)
-    compare_ratio, best_match, report = CompareStuff(soln_totals_elements, student_totals_elements, num_totals, False)
+    best_match, best_match_count = CompareStuff(soln_totals_elements, student_totals_elements, num_totals, False)
     if debug:
         print('Solution Totals: {}'.format(soln_totals_elements))
         print('Student Totals: {}'.format(student_totals_elements))
@@ -997,7 +1012,7 @@ def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
         stdnt_display_groupby += [['GROUP BY'] + GetFieldsFromCompoundField(compound_field)]
     # Check to see how many field,table matches between two queries
     groupby_cnt, matches = GetNumberMatches(soln_groupby_elements, student_groupby_elements, debug)
-    compare_ratio, best_match, report = CompareStuff(soln_display_groupby, stdnt_display_groupby,
+    best_match, best_match_count = CompareStuff(soln_display_groupby, stdnt_display_groupby,
                                                      len(soln_display_groupby), False)
     if debug:
         print('Solution group by: {}'.format(soln_display_groupby))
@@ -1010,43 +1025,40 @@ def AssessQueryGroupby(soln_groupby, student_groupby, debug=True):
     return soln_display_groupby, stdnt_display_groupby, best_match
 
 def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, debug=True):
+    if soln_groupby is None and '(' not in soln_select:
+        return 0, ''
     if soln_select == student_select and soln_groupby == student_groupby:
         return 1, ['\tTOTALS functions match\n']
     totals_score = 0
-    totals_report = ''
     soln_groupby_elements = soln_totals_elements = stdnt_groupby_elements = stdnt_totals_elements = \
         best_groupby = best_totals = []
-    groupby_penalty = totals_functions_exist = False
     if soln_groupby is not None:  # If there is a GROUP BY in solution
         soln_groupby_elements, stdnt_groupby_elements, best_groupby = AssessQueryGroupby(soln_groupby, student_groupby,
                                                                                          debug)
-        totals_functions_exist = True
     if '(' in soln_select or ')' in soln_select:  # If there is a totals function in solution
         soln_totals_elements, stdnt_totals_elements, best_totals = AssessQueryTotalsFunctions(soln_select,
                                                                                                 student_select, debug)
-        totals_functions_exist = True
-    if not totals_functions_exist:
-        return 0, ''
     num_matches = np.size(best_groupby) + np.size(best_totals)
     num_possible = np.size(soln_groupby_elements) + np.size(soln_totals_elements)
+    extra_stmts = len(stdnt_groupby_elements) + len(stdnt_totals_elements) - len(soln_groupby_elements)\
+                  - len(soln_totals_elements)
+    if extra_stmts < 0:
+        extra_stmts = 0
     if len(soln_groupby_elements) > 0 or len(soln_totals_elements) > 0:
-        totals_score = num_matches / num_possible
-    # extra_stmts = np.size(soln_groupby_elements) + np.size(soln_totals_elements) - np.size(stdnt_groupby_elements) - \
-    #               np.size(stdnt_totals_elements)  # not using so don't penalize twice (already penalized in select)
+        totals_score = num_matches / num_possible * (1-(extra_stmts*too_many_penalty))
     if totals_score == 1:
         totals_report = ['\tTOTALS functions match\n']
 
     else:
         totals_report = ['\tTOTALS functions DO NOT match\n']
-    totals_report[0] += '\t\tSOLN totals: {}\n\t\tSTDNT totals: {}\n\t\tBest match: {}\n\t\tScore: {} Matching / {} ' \
-                        'Possible = {}\n\t\tNote -- No penalty for extra elements, since penalized in SELECT analysis' \
-                        '.\n'.format(soln_groupby_elements+soln_totals_elements,
-                                     stdnt_groupby_elements+stdnt_totals_elements, best_groupby+best_totals, num_matches,
-                                     num_possible, totals_score)
+    totals_report[0] += '\t\tSOLN totals: {}\n\t\tSTDNT totals: {}\n\t\tBest match: {}\n\t\tTotals Score =  {:.1f}% ' \
+                        '({} Matches / {} Possible * {:.1f}% Extra statement penalty' \
+                        ')\n'.format(soln_groupby_elements+soln_totals_elements, stdnt_groupby_elements +
+                                     stdnt_totals_elements, best_groupby+best_totals, totals_score*100, num_matches,
+                                     num_possible, extra_stmts*too_many_penalty*100)
     return totals_score, totals_report
 
 
-# Need to add something for ascending vs descending
 def AssessQuerySort(soln_sort, student_sort, debug=True):
     if debug:
         print('\n\tASSESSING SORT')
@@ -1084,20 +1096,25 @@ def AssessQuerySort(soln_sort, student_sort, debug=True):
                 if len(soln_elements) == len(student_elements):
                     direction_score += 1
         first_time_through_loop = False
+    extra_stmts = 0
+    if len(all_stdnt_elements) >len(all_soln_elements):
+        extra_stmts = len(all_stdnt_elements) - len(all_soln_elements)
     if debug:
         print('SOLN elements:', all_soln_elements)
         print('STDNT elements:', all_stdnt_elements)
     num_elements = len(soln_stripped_sort)
     if debug:
         print('Fields Score: {}\nOrder score: {}\nDirection score: {}'.format(sort_score, order_score, direction_score))
-    final_score = (sort_score + order_score + direction_score) / num_elements / 3
+    base_score = (sort_score + order_score + direction_score) / num_elements / 3
+    sort_penalty = too_many_penalty*extra_stmts
+    final_score = base_score * (1 - sort_penalty)
     if final_score >= 1:
         return 1, ['\tORDER BY statements match\n']
     else:
-        report = ['\tORDER BY statements DO NOT match\n\t\tSOLN ordering: {}\n\t\tSTDNT ordering" {}\n\t\tSort fields: '
-                  '{} / {}\tSort direction: {} / {}\tField ordering: {} / {}\n\t\tSort score: '
-                  '{}'.format(all_soln_elements, all_stdnt_elements, sort_score, num_elements, direction_score,
-                              num_elements, order_score, num_elements, final_score)]
+        report = ['\tORDER BY statements DO NOT match\n\t\tSOLN ordering: {}\n\t\tSTDNT ordering: {}\n\t\tSort score = '
+                  '{:.1f}% (({}/{} Sort fields + {}/{} Sort direction + {}/{} Field ordering) * {:.1f}% extra statement '
+                  'penalty)'.format(all_soln_elements, all_stdnt_elements, final_score*100, sort_score, num_elements,
+                                    direction_score, num_elements, order_score, num_elements, sort_penalty*100)]
         return final_score, report
 
 
@@ -1118,31 +1135,33 @@ def AssessStringQuery(query1, string):
     return any(map(lambda x,y:y == x,SQL1_parts,SQL2_parts))
 
 
-def AssessQuery(query1, query2, debug=False):
+def QuickSQLCheck(SQL1, SQL2):
+    if SQL1.replace('\r', '').rstrip() == SQL2.replace('\r', '').rstrip():
+        return 1
+    else:
+        return 0
+
+
+def AssessQuery(query1, query2, compare_records=True, debug=False):
     if debug:
         print('ASSESSING QUERY')
-    row_count_score = exact_rec_score = select_score = from_score = criteria_score \
-                    = groupby_score = totals_score = sort_score = 0
+    exact_rec_score = select_score = from_score = criteria_score = groupby_score = sort_score = 0
     where_penalty = having_penalty = groupby_penalty = sort_penalty = False
     query_report = ['{} QUERY\n'.format(query1.Name)]
-    if query1.SQL == query2.SQL:
+    if QuickSQLCheck(query1.SQL, query2.SQL):
         query_report += ['\tExact SQL match']
         if debug:
             print(''.join(query_report))
         return QueryScore(1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty, 4), \
                query_report
 
-    if query1.RecordCount == query2.RecordCount:
-        row_count_score = 1
-    if row_count_score:
-        exact_rec_score = AssessTableEntries(query1, query2)
-    # If some variation of exact record match then return
-    if exact_rec_score == 4:
-        query_report += ['\tExact record match']
-        if debug:
-            print(''.join(query_report))
-        return QueryScore(1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty, 4), \
-               query_report
+    if compare_records:
+        if ExactRecordsMatch(query1, query2):
+            query_report += ['\tExact record match']
+            if debug:
+                print(''.join(query_report))
+            return QueryScore(1, 1, 1, 1, 1, 1, where_penalty, having_penalty, groupby_penalty, sort_penalty, 4), \
+                   query_report
     SQL1_parts = query1.SQL.strip().split('\n')
     SQL2_parts = query2.SQL.strip().split('\n')
     # first element of any query SQL is the select statement, so see if they are selecting correct fields
@@ -1205,6 +1224,10 @@ def AssessQuery(query1, query2, debug=False):
     if debug:
         print(''.join(query_report))
     return query_results, query_report
+
+def ShowResults(reportm, type):
+    pass
+
 '''-----------------------------------------------------------------------------------------------'''
 '''-----------------------------------------------------------------------------------------------'''
 
@@ -1215,24 +1238,24 @@ def main():
     SolnDB = DataBase(SolnDBPath)
     StudentDB = DataBase(StudentDBPath)
     # Print meta data on all the tables in the database
-    for table in SolnDB.TableNames:
-        print(SolnDB.Tables[table], '\n')
+    # for table in SolnDB.TableNames:
+    #     print(SolnDB.Tables[table], '\n')
     # Print meta data on all the queries in the database
-    for query in SolnDB.QueryNames:
-        print(SolnDB.Queries[query], '\n')
+    # for query in SolnDB.QueryNames:
+    #     print(SolnDB.Queries[query], '\n')
     # print all the relationships in the table
     # for relationship in SolnDB.Relationships:
     #    print(json.dumps(relationship))
-    print(json.dumps(SolnDB.Relationships))
+    # print(json.dumps(SolnDB.Relationships))
     # print all the records in a table (Note: If debug < 2, it doesn't print anything. Just returns the records)
-    print('Platoon Table Records')
-    SolnDB.Tables['Platoon'].GetRecords(debug=2)
-    print()
+    # print('Platoon Table Records')
+    # SolnDB.Tables['Platoon'].GetRecords(debug=2)
+    # print()
     # print the lookups for a field (Note: If debug < 2, it doesn't print anything. Just returns the Lookup tuple)
-    print('Lookups for soldierTrained field in SoldierCompletesTraining')
-    table = SolnDB.Tables['SoldierCompletesTraining']
-    table.GetLookups('soldierTrained', debug=2)
-    print()
+    # print('Lookups for soldierTrained field in SoldierCompletesTraining')
+    # table = SolnDB.Tables['SoldierCompletesTraining']
+    # table.GetLookups('soldierTrained', debug=2)
+    # print()
     # print the properties for some metadata (e.g. Table, Query, or Field)
     # print('Table Properties')
     # ListProperties(table._TableMetaData)
@@ -1241,26 +1264,35 @@ def main():
     # print(field.Properties['ColumnHidden'].Value)
     # print('\nQuery Properties')
     # ListProperties(SolnDB.Queries['APFTStars']._TableMetaData)
+    # print(SolnDB.Queries['APFTStars']._TableMetaData)
 
-    table_assessment, report = AssessTables(SolnDB.Tables['SoldierCompletesTraining'],
-                                    StudentDB.Tables['SoldierCompletesTraining'])
-    # table_assessment = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'])
-    print()
-    print('Comparing "SoldierCompletesTraining" tables...')
-    # print(table_assessment)
+    # table_assessment, report = AssessTables(SolnDB.Tables['SoldierCompletesTraining'],
+    #                                 StudentDB.Tables['SoldierCompletesTraining'])
+    table_assessment, report = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'], compare_records=False)
     print(''.join(report))
-    print('\nFinal Table Score: ', ScoreTable(table_assessment))
-    query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'])
+    # print()
+    # print('Comparing "SoldierCompletesTraining" tables...')
+    # print(table_assessment)
+
+    # print('Final Table Score: ', ScoreTable(table_assessment))
+    query_assessment, q_report = AssessQuery(SolnDB.Queries['APFTStars'], StudentDB.Queries['APFTStars'], compare_records=False)
+    q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, CRITERIAscore=0.25, TOTALSscore=.25,  SORTscore=0.1)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Junior25BList'], StudentDB.Queries['Junior25BList'])
-    # query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'],debug=False)
+    # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
+    # query_assessment, q_report = AssessQuery(SolnDB.Queries['Max2017APFTScores'], StudentDB.Queries['Max2017APFTScores'])
+    # q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, CRITERIAscore=0.25, TOTALSscore=.25,  SORTscore=0.1)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['MostRecentlyPromoted'], StudentDB.Queries['MostRecentlyPromoted'])
+    # q_weight = AssignQueryWeights(SELECTscore=0.35, FROMscore=0.35, SORTscore=0.3)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
+    # q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, CRITERIAscore=0.25, SORTscore=0.1)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
+    # q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, SORTscore=0.1)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
+    # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
-    print()
+    # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
     print(''.join(q_report))
-    print('\nFinal Query Score: ', ScoreQuery(query_assessment))
+    print('Final Query Score: ', ScoreQuery(query_assessment, q_weight))
 
 if __name__ == "__main__":
     main()
