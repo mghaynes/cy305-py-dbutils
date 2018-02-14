@@ -1304,7 +1304,7 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
     if extra_statements:
         query_report += ['\tExtra statements include: {}\n'.format(', '.join(extra_statements))]
 
-    if debug or not debug:
+    if debug:
         print('\nSELECT score: {}\nFROM score: {}\nWHERE/HAVING score: {}\nGROUP BY score: {}\nTOTALS score: {}'
           '\nSORT score: {}'.format(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score))
         print('\n{}'.format(query1.SQL))
@@ -1315,8 +1315,13 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
         print(''.join(query_report))
     return query_results, query_report
 
-def PrintReport(report, for_students=False):
-    final_report = ''.join(report).strip()
+def PrintReport(report, for_students=False, hide_output=None):
+    if hide_output is None:
+        final_report = ''.join(report).strip()
+    else:
+        final_report = [report[0]]
+        final_report += [report[c+1] for c, i in enumerate(hide_output) if i == 1]
+        final_report = ''.join(final_report).strip()
     if for_students:
         final_report = re.sub(r'SOLN.*\n\t\t', '', final_report)
     print(final_report)
@@ -1351,7 +1356,7 @@ def main():
     table2 = StudentDB.Tables['SoldierCompletesTraining']
     # table.GetLookupProperties('soldierTrained', debug=2)
     lookup_comp, l_report = CompareLookupProperties(table, 'soldierTrained', table2, 'soldierTrained')
-    print(''.join(l_report))
+    PrintReport(l_report, for_students=False, hide_output=(1,1,1,1,1,0,1))
     print('Lookup score:', ScoreLookups(lookup_comp))
     # print()
     # print the properties for some metadata (e.g. Table, Query, or Field)
@@ -1367,7 +1372,7 @@ def main():
     # table_assessment, report = AssessTables(SolnDB.Tables['SoldierCompletesTraining'],
     #                                 StudentDB.Tables['SoldierCompletesTraining'])
     table_assessment, report = AssessTables(SolnDB.Tables['Platoon'], StudentDB.Tables['Platoon'], compare_records=False)
-    print(''.join(report))
+    PrintReport(report, for_students=False, hide_output=(1,1,1,0,1,1))
     # print()
     # print('Comparing "SoldierCompletesTraining" tables...')
     # print(table_assessment)
@@ -1389,7 +1394,7 @@ def main():
     # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
     # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
-    PrintReport(q_report, True)
+    PrintReport(q_report, False)
     print('Final Query Score: ', ScoreQuery(query_assessment, q_weight))
 
 if __name__ == "__main__":
