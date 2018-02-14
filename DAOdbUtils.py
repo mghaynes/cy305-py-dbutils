@@ -7,7 +7,6 @@ import win32com.client
 import numpy as np
 # these are built in to python
 import collections
-import json
 import re
 import itertools
 import copy
@@ -530,7 +529,13 @@ def GradeRelationships(rltn_dict1, rltn_dict2, debug=False):
 def ExactRecordsMatch(table1, table2):
     if table1.RecordCount == table2.RecordCount:
         table1_recs = table1.GetRecords()
+        if table1.RecordCount is None:
+            table1.RecordCount = len(table1_recs)
         table2_recs = table2.GetRecords()
+        if table2.RecordCount is None:
+            table2.RecordCount = len(table2_recs)
+        if table1.RecordCount != table2.RecordCount:
+            return 0
         # check exact table match (i.e. row,col values all match)
         for cnt, row in enumerate(table1_recs):
             if row != table2_recs[cnt]:
@@ -665,10 +670,16 @@ def ScoreTable(assessed_table, score_vector=base_table_weight):
 
 
 def ScoreQuery(assessed_query, score_vector=base_query_weight):
+    global too_many_penalty
     query_score = 0
+    penalty_count = 0
     for cnt in range(len(assessed_query)):
         if not isinstance(assessed_query[cnt], bool):
             query_score += assessed_query[cnt]*score_vector[cnt]
+        else:
+            if assessed_query[cnt] == True:
+                penalty_count += 1
+    query_score *= (1-(penalty_count*too_many_penalty))
     return query_score
 
 
@@ -1182,7 +1193,7 @@ def AssessQuerySort(soln_sort, student_sort, debug=True):
     else:
         report = ['\tORDER BY statements DO NOT match\n\t\tSOLN ordering: {}\n\t\tSTDNT ordering: {}\n\t\tSort score = '
                   '{:.1f}% (({}/{} Sort fields + {}/{} Sort direction + {}/{} Field ordering) * {:.1f}% extra statement '
-                  'penalty)'.format(all_soln_elements, all_stdnt_elements, final_score*100, sort_score, num_elements,
+                  'penalty)\n'.format(all_soln_elements, all_stdnt_elements, final_score*100, sort_score, num_elements,
                                     direction_score, num_elements, order_score, num_elements, sort_penalty*100)]
         return final_score, report
 
@@ -1216,6 +1227,7 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
         print('ASSESSING QUERY')
     exact_rec_score = select_score = from_score = criteria_score = groupby_score = sort_score = 0
     where_penalty = having_penalty = groupby_penalty = sort_penalty = False
+    extra_statements = []
     query_report = ['{} QUERY\n'.format(query1.Name)]
     if QuickSQLCheck(query1.SQL, query2.SQL):
         query_report += ['\tExact SQL match']
@@ -1262,18 +1274,24 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
         query_report += criteria_report
     if soln_where is None and student_where is not None:
         where_penalty = True  # Penalty for using WHERE when not supposed to
+        extra_statements.append('WHERE')
     if soln_having is None and student_having is not None:
         having_penalty = True  # Penalty for using HAVING when not supposed to
-
+        extra_statements.append('HAVING')
     # Assess 'GROUPBY' and Totals functions
     soln_groupby = FindSubStatement(SQL1_parts, 'GROUP BY')
     student_groupby = FindSubStatement(SQL2_parts, 'GROUP BY')
     totals_score, totals_report = AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, debug)
-    if (soln_groupby is None and student_groupby is not None) or ('(' not in soln_select and '(' in student_select):
-        groupby_penalty = True  # Penalty for using totals functions when not supposed to
     if len(totals_report) > 0:
         query_report += totals_report
-
+    if (soln_groupby is None and student_groupby is not None) or ('(' not in soln_select and '(' in student_select):
+        groupby_penalty = True  # Penalty for using totals functions when not supposed to
+        if having_penalty and soln_where is not None:
+            having_penalty = False
+        extra_statements.append('TOTALS functions')
+    if soln_groupby is not None and student_groupby is not None and soln_where is not None and soln_having is None and\
+            student_having is not None and student_where is None:
+        having_penalty = False
     # Assess 'SORT'
     soln_sort = FindSubStatement(SQL1_parts, 'ORDER')
     student_sort = FindSubStatement(SQL2_parts, 'ORDER')
@@ -1281,9 +1299,12 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
             sort_score, sort_report = AssessQuerySort(soln_sort, student_sort, debug)
             query_report += sort_report
     if soln_sort is None and student_sort is not None:
-        pass  # Penalty for sorting when not supposed to
+        sort_penalty = True  # Penalty for sorting when not supposed to
+        extra_statements.append('ORDER BY')
+    if extra_statements:
+        query_report += ['\tExtra statements include: {}\n'.format(', '.join(extra_statements))]
 
-    if debug:
+    if debug or not debug:
         print('\nSELECT score: {}\nFROM score: {}\nWHERE/HAVING score: {}\nGROUP BY score: {}\nTOTALS score: {}'
           '\nSORT score: {}'.format(select_score, from_score, criteria_score, groupby_score, totals_score, sort_score))
         print('\n{}'.format(query1.SQL))
@@ -1359,7 +1380,7 @@ def main():
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['Q42017Awards'], StudentDB.Queries['Q42017Awards'])
     # q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, CRITERIAscore=0.25, SORTscore=0.1)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldierNames'], StudentDB.Queries['SoldierNames'])
-    # q_weight = AssignQueryWeights(SELECTscore=0.15, FROMscore=0.25, SORTscore=0.1)
+    # q_weight = AssignQueryWeights(SELECTscore=0.35, FROMscore=0.35, SORTscore=0.3)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['SoldiersTrainedOnTARPandCRM'], StudentDB.Queries['SoldiersTrainedOnTARPandCRM'])
     # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
