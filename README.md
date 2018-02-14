@@ -22,10 +22,6 @@ tested using Microsoft Access 2013 and the
   + win32com (pypiwin32)
   + levenshtein (python-Levenshtein)
   + numpy (numpy)
-
-*Note: the levenshtein module requires installation of Visual C++ Build
- Tools. Code tested with [Visual C++ 2015 Build Tools](http://landinghub.visualstudio.com/visual-cpp-build-tools).
- 
   
 ## Quick Start
 ### Loading a database file 
