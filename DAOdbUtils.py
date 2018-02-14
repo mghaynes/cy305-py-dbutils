@@ -1315,8 +1315,12 @@ def AssessQuery(query1, query2, compare_records=True, debug=False):
         print(''.join(query_report))
     return query_results, query_report
 
-def ShowResults(reportm, type):
-    pass
+def PrintReport(report, for_students=False):
+    final_report = ''.join(report).strip()
+    if for_students:
+        final_report = re.sub(r'SOLN.*\n\t\t', '', final_report)
+    print(final_report)
+    return final_report
 
 '''-----------------------------------------------------------------------------------------------'''
 '''-----------------------------------------------------------------------------------------------'''
@@ -1385,7 +1389,7 @@ def main():
     # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
     # query_assessment, q_report = AssessQuery(SolnDB.Queries['UntrainedLeaders'], StudentDB.Queries['UntrainedLeaders'])
     # q_weight = AssignQueryWeights(SELECTscore=0.25, FROMscore=0.3, CRITERIAscore=0.3, SORTscore=0.15)
-    print(''.join(q_report))
+    PrintReport(q_report, True)
     print('Final Query Score: ', ScoreQuery(query_assessment, q_weight))
 
 if __name__ == "__main__":
