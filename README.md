@@ -20,7 +20,6 @@ tested using Microsoft Access 2013 and the
 
 2. Install the following python modules:
   + win32com (pypiwin32)
-  + levenshtein (python-Levenshtein)
   + numpy (numpy)
   
 ## Quick Start
