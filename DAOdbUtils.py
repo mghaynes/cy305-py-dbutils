@@ -3,7 +3,7 @@
 # you'll need to import these libraries
 # pip install pypiwin32
 import win32com.client
-# import distance
+import distance
 import numpy as np
 # these are built in to python
 import collections
@@ -15,6 +15,7 @@ import copy
 
 debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose (NOT IMPLEMENTED YET)
 too_many_penalty = .05  # penalty for selecting too many items
+max_misspelled = 3
 
 Lookup = collections.namedtuple('Lookup', ['DisplayControl', 'RowSourceType', 'RowSource', 'BoundColumn',
                                            'ColumnCount', 'ColumnWidths', 'LimitToList'])
@@ -308,6 +309,7 @@ class Table:
 '''---------------------------------------------- END TABLE CLASS ------------------------------------------------'''
 
 def CompareLookupProperties(soln_table, soln_field, stdnt_table, stdnt_field):
+    global max_misspelled
     soln_lookup = soln_table.GetLookupProperties(soln_field)
     stdnt_lookup = stdnt_table.GetLookupProperties(stdnt_field)
     display_control = row_source_type = row_source = bound_column = column_count = column_widths = limit_to_list = 0
@@ -324,7 +326,7 @@ def CompareLookupProperties(soln_table, soln_field, stdnt_table, stdnt_field):
     else:
         report += ['\tRow source type DOES NOT match\n\t\tSOLN row source type:{}\n\t\tSTDNT row source type: '
                    '{}\n'.format(soln_lookup.RowSourceType, stdnt_lookup.RowSourceType)]
-    if stdnt_lookup.RowSource == soln_lookup.RowSource:
+    if distance.levenshtein(stdnt_lookup.RowSource.lower(), soln_lookup.RowSource.lower()) <= max_misspelled:
         row_source = 1
         report += ['\tRow source matches\n']
     else:
@@ -486,6 +488,7 @@ def ListProperties(object):
 
 
 def GradeRelationships(rltn_dict1, rltn_dict2, debug=False):
+    global max_misspelled
     correct_num_rltns = fld = rltd_fld = rltd_tbl = join = integrity = 0
     # if no relationships then return all 1s
     if rltn_dict1 == '':
@@ -510,7 +513,7 @@ def GradeRelationships(rltn_dict1, rltn_dict2, debug=False):
                         print(field1)
                     rltn1 = rltn_dict1[rltd_tbl1_key][field1]
                     rltn2 = rltn_dict2[rltd_tbl1_key][field1]
-                    if rltn1.RelatedField == rltn2.RelatedField:
+                    if distance.levenshtein(rltn1.RelatedField.lower(), rltn2.RelatedField.lower()) <= max_misspelled:
                         rltd_fld += 1
                     if rltn1.JoinType == rltn2.JoinType:
                         join += 1
@@ -586,11 +589,12 @@ def AssessTableEntries(table1, table2, quick_answer=False):
 # score returned is 0.67 (this makes it easier to multiply by whatever rubric you want to use)
 def AssessTables(table1, table2, compare_records = True):
     global too_many_penalty
+    global max_misspelled
     name_score = row_count_score = col_count_score = field_name_score = field_type_score = field_size_score = \
         exact_rec_score = excess_fields = 0
     score_report = []
     score_report += ['{} TABLE\n'.format(table1.Name)]
-    if table1.Name == table2.Name:
+    if distance.levenshtein(table1.Name.lower(), table2.Name.lower()) <= max_misspelled:
         name_score = 1
         score_report += ['\t-Table names match\n']
     else:
@@ -606,8 +610,13 @@ def AssessTables(table1, table2, compare_records = True):
     table1_sizes = table1.GetSizes()
     table2_sizes = table2.GetSizes()
     for cnt, field in enumerate(table1_fields):
-        if field in table2_fields:
-            table2_idx = table2_fields.index(field)
+        # added the next 3 lines to take field closest to correct as long as distance < max_misspelled
+        distance_list = [distance.levenshtein(field, i) for i in table2_fields]
+        smallest_distance = min(distance_list)
+        # if field in table2_fields:
+        if smallest_distance <= max_misspelled:
+            # table2_idx = table2_fields.index(field)
+            table2_idx = distance_list.index(smallest_distance)
             field_name_score += 1
             if table1_types[cnt] == table2_types[table2_idx]:
                 field_type_score += 1
@@ -630,11 +639,19 @@ def AssessTables(table1, table2, compare_records = True):
         score_report += ['\t-Field sizes match\n']
     else:
         score_report += ['\t-Field sizes DO NOT match\n\t\tSoln: {}\n\t\tStdnt: {}\n'.format(table1_fields, table2_fields)]
+
+    # how to handle primary key distance?
     # primary keys intersection returns primary keys in common between table1 and table2
-    pk_same = len(set(table1.PrimaryKeys).intersection(table2.PrimaryKeys)) / len(table1.PrimaryKeys)
+    # pk_same = len(set(table1.PrimaryKeys).intersection(table2.PrimaryKeys)) / len(table1.PrimaryKeys)
+    num_pk_matches, pk_matches = GetNumberMatches(table1.PrimaryKeys, table2.PrimaryKeys)
+    pk_same = num_pk_matches / len(table1.PrimaryKeys)
     # this finds number keys that the student (table2) has that are not in the solution (table1)
-    pk_diff = len(set(table2.PrimaryKeys).difference(table1.PrimaryKeys))
-    pk_same *= (1-(pk_diff*too_many_penalty))
+    # pk_diff = len(set(table2.PrimaryKeys).difference(table1.PrimaryKeys))
+    pk_diff = len(table1.PrimaryKeys) - num_pk_matches
+    extra_pk = len(table2.PrimaryKeys) - len(table1.PrimaryKeys)
+    if extra_pk < 0:
+        extra_pk = 0
+    pk_same *= (1-(extra_pk*too_many_penalty))
     if pk_same == 1:
         score_report += ['\t-Primary keys match\n']
     else:
@@ -682,8 +699,15 @@ def ScoreQuery(assessed_query, score_vector=base_query_weight):
     query_score *= (1-(penalty_count*too_many_penalty))
     return query_score
 
+def FindMinDistance(field, comparison_list):
+    distance_list = [distance.levenshtein(field.lower(), i.lower()) for i in comparison_list]
+    smallest_distance = min(distance_list)
+    smallest_item = comparison_list[distance_list.index(smallest_distance)]
+    return smallest_distance, smallest_item
+
 
 def GetNumberMatches(reference_list, list2, debug=True):
+    global max_misspelled
     count = 0
     matches = []
     copy_list = copy.deepcopy(reference_list)
@@ -691,10 +715,12 @@ def GetNumberMatches(reference_list, list2, debug=True):
     #     print('LIST1:', reference_list)
     #     print('LIST2:', list2)
     for item in list2:
-        if item in copy_list:
+        # if item in copy_list:
+        sm_distance, sm_item = FindMinDistance(item, copy_list)
+        if sm_distance < max_misspelled:
             count += 1
-            matches.append(item)
-            copy_list.remove(item)
+            matches.append(sm_item)
+            copy_list.remove(sm_item)
     # if debug:
     #     print('Num Matches: {}\nMatches: {}'.format(count, matches))
     return count, matches
@@ -902,6 +928,8 @@ def GetConditionalElements(statement):
                 elements = elements[:-1]  # remove last symbol (appended after last elements so extra)
             break  # if found a symbol exit loop to prevent duplicates
     if not elements and statement:  # if elements list is empty and statement is not empty, add operand to list
+        if statement == 'Yes':
+            statement = 'True'
         elements.append(statement)
     return elements
 
@@ -1140,6 +1168,7 @@ def AssessTotalsRow(soln_groupby, student_groupby, soln_select, student_select, 
 
 
 def AssessQuerySort(soln_sort, student_sort, debug=True):
+    global max_misspelled
     if debug:
         print('\n\tASSESSING SORT')
         print('Soln Sort:', soln_sort)
@@ -1169,7 +1198,7 @@ def AssessQuerySort(soln_sort, student_sort, debug=True):
             if first_time_through_loop:
                 all_stdnt_elements.append(student_elements)
             # print('Stdnts', student_elements)
-            if soln_elements[0] in student_elements[0]:
+            if distance.levenshtein(soln_elements[0], student_elements[0]) < max_misspelled:
                 sort_score += 1
                 if cnt == cnt2:
                     order_score += 1
@@ -1216,7 +1245,8 @@ def AssessStringQuery(query1, string):
 
 
 def QuickSQLCheck(SQL1, SQL2):
-    if SQL1.replace('\r', '').rstrip() == SQL2.replace('\r', '').rstrip():
+    global max_misspelled
+    if distance.levenshtein(SQL1.replace('\r', '').rstrip(), SQL2.replace('\r', '').rstrip()) < max_misspelled:
         return 1
     else:
         return 0
