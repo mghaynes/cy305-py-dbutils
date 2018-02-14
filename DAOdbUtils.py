@@ -13,12 +13,6 @@ import itertools
 import copy
 
 
-'''
-TO DO: 
-1) Check if the field is supposed to be hidden for queries
-2) Add functions to check lookup properties
-
-'''
 
 debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose (NOT IMPLEMENTED YET)
 too_many_penalty = .05  # penalty for selecting too many items
@@ -222,7 +216,7 @@ class Table:
         return columns
 
 
-    def GetLookups(self, fieldName, debug=0):
+    def GetLookupProperties(self, fieldName, debug=0):
         # Note that the ColumnWidths uses twips a unit of measure where 1 in = 1440 twips, 1 cm = 567 twips
         LookupFields = ['RowSourceType', 'RowSource', 'BoundColumn', 'ColumnCount', 'ColumnWidths',
                         'LimitToList']
@@ -313,6 +307,81 @@ class Table:
 
 
 '''---------------------------------------------- END TABLE CLASS ------------------------------------------------'''
+
+def CompareLookupProperties(soln_table, soln_field, stdnt_table, stdnt_field):
+    soln_lookup = soln_table.GetLookupProperties(soln_field)
+    stdnt_lookup = stdnt_table.GetLookupProperties(stdnt_field)
+    display_control = row_source_type = row_source = bound_column = column_count = column_widths = limit_to_list = 0
+    report = ['{} FIELD LOOKUP ({} Table)\n'.format(soln_field, soln_table.Name)]
+    if stdnt_lookup.DisplayControl == soln_lookup.DisplayControl:
+        display_control = 1
+        report += ['\tDisplay control matches\n']
+    else:
+        report += ['\tDisplay control DOES NOT match\n\t\tSOLN display control:{}\n\t\tSTDNT display control: '
+                   '{}\n'.format(soln_lookup.DisplayControl, stdnt_lookup.DisplayControl)]
+    if stdnt_lookup.RowSourceType == soln_lookup.RowSourceType:
+        row_source_type = 1
+        report += ['\tRow source type matches\n']
+    else:
+        report += ['\tRow source type DOES NOT match\n\t\tSOLN row source type:{}\n\t\tSTDNT row source type: '
+                   '{}\n'.format(soln_lookup.RowSourceType, stdnt_lookup.RowSourceType)]
+    if stdnt_lookup.RowSource == soln_lookup.RowSource:
+        row_source = 1
+        report += ['\tRow source matches\n']
+    else:
+        report += ['\tRow source DOES NOT match\n\t\tSOLN row source: {}\n\t\tSTDNT row source: '
+                   '{}\n'.format(soln_lookup.RowSource, stdnt_lookup.RowSource)]
+    if stdnt_lookup.BoundColumn == soln_lookup.BoundColumn:
+        bound_column = 1
+        report += ['\tBound column matches\n']
+    else:
+        report += ['\tBound column DOES NOT match\n\t\tSOLN bound column:{}\n\t\tSTDNT bound column: '
+                   '{}\n'.format(soln_lookup.BoundColumn, stdnt_lookup.BoundColumn)]
+    if stdnt_lookup.ColumnCount == soln_lookup.ColumnCount:
+        column_count = 1
+        report += ['\tColumn count matches\n']
+    else:
+        report += ['\tColumn count DOES NOT match\n\t\tSOLN column count:{}\n\t\tSTDNT column count: '
+                   '{}\n'.format(soln_lookup.ColumnCount, stdnt_lookup.ColumnCount)]
+    if stdnt_lookup.LimitToList == soln_lookup.LimitToList:
+        limit_to_list = 1
+        report += ['\tLimit to list matches\n']
+    else:
+        report += ['\tLimit to list DOES NOT match\n\t\tSOLN limit to list:{}\n\t\tSTDNT limit to list: '
+                   '{}\n'.format(soln_lookup.LimitToList, stdnt_lookup.LimitToList)]
+    # several ColumnWidth scenarios, first and easiest is exact match
+    if stdnt_lookup.ColumnWidths == soln_lookup.ColumnWidths:
+        column_widths = 1
+        report += ['\tColumn widths match\n']
+        return Lookup(display_control, row_source_type, row_source, bound_column, column_count, column_widths,
+                      limit_to_list), report
+    soln_column_width_elements = soln_lookup.ColumnWidths.split(';')
+    stdnt_column_width_elements = stdnt_lookup.ColumnWidths.split(';')
+    # Assume only care about 0 fields, then find every column set to 0 width in solution and see if same in student
+    soln_zero_cols = [c for c, i in enumerate(soln_column_width_elements) if i == '0']
+    all_match = [stdnt_column_width_elements[x] == '0' for x in soln_zero_cols if x < len(stdnt_column_width_elements)]
+    if all(all_match):
+        column_widths = 1
+        report += ['\tColumn widths match\n']
+    else:
+        report += ['\tColumn widths DO NOT match\n\t\tSOLN column widths:{}\n\t\tSTDNT column widths: '
+                   '{}\n'.format(soln_lookup.ColumnWidths, stdnt_lookup.ColumnWidths)]
+
+    return Lookup(display_control, row_source_type, row_source, bound_column, column_count, column_widths,
+                  limit_to_list), report
+
+
+def AssignLookupWeights(display_control=0, row_source_type=0, row_source=0, bound_column=0, column_count=0,
+                    column_widths=0, limit_to_list=0):
+    return Lookup(display_control, row_source_type, row_source, bound_column, column_count, column_widths,
+                  limit_to_list)
+base_lookup_weight = AssignLookupWeights(display_control=.175, row_source_type=.175, row_source=.175, bound_column=.175,
+                                         column_count=.15, column_widths=.15, limit_to_list=0)
+def ScoreLookups(lookup, lookup_weight=base_lookup_weight):
+    score = 0
+    for cnt, item in enumerate(lookup):
+        score += item*lookup_weight[cnt]
+    return score
 
 
 # CLASS TableScore
@@ -1253,8 +1322,12 @@ def main():
     # print()
     # print the lookups for a field (Note: If debug < 2, it doesn't print anything. Just returns the Lookup tuple)
     # print('Lookups for soldierTrained field in SoldierCompletesTraining')
-    # table = SolnDB.Tables['SoldierCompletesTraining']
-    # table.GetLookups('soldierTrained', debug=2)
+    table = SolnDB.Tables['SoldierCompletesTraining']
+    table2 = StudentDB.Tables['SoldierCompletesTraining']
+    # table.GetLookupProperties('soldierTrained', debug=2)
+    lookup_comp, l_report = CompareLookupProperties(table, 'soldierTrained', table2, 'soldierTrained')
+    print(''.join(l_report))
+    print('Lookup score:', ScoreLookups(lookup_comp))
     # print()
     # print the properties for some metadata (e.g. Table, Query, or Field)
     # print('Table Properties')
