@@ -15,7 +15,7 @@ import copy
 
 debug = 0  # Set from 0 or 2 to get varying levels of output; 0=no output, 2=very verbose (NOT IMPLEMENTED YET)
 too_many_penalty = .05  # penalty for selecting too many items
-max_misspelled = 3
+max_misspelled = 2
 
 Lookup = collections.namedtuple('Lookup', ['DisplayControl', 'RowSourceType', 'RowSource', 'BoundColumn',
                                            'ColumnCount', 'ColumnWidths', 'LimitToList'])
@@ -915,7 +915,13 @@ def GetConditionalElements(statement):
     # print(statement)
     elements = []
     # list of conditional statments we check for
-    symbols = [' And ', ' Or ', '>=', '<=', '=', '>', '<', 'Between', 'Is Null']
+    symbols = [' And ', ' Or ', '>=', '<=', '=', '>', '<', 'Between']
+    if 'Is Null' in statement:
+        elements += ['Is Null', 'Is Null'] # appending twice cause usually is null is major part of correct answer
+        field = statement.split('Is Null')[0]
+        table_name = GetFieldsFromCompoundField(field)[0] # only keeping table name cause field doesn't matter
+        elements += [table_name, table_name]
+        return elements
     for symbol in symbols:
         if symbol in statement:
             temp_elements = statement.split(symbol)  # split statement on symbol
