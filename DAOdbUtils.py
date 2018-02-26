@@ -220,6 +220,8 @@ class Table:
         # Note that the ColumnWidths uses twips a unit of measure where 1 in = 1440 twips, 1 cm = 567 twips
         LookupFields = ['RowSourceType', 'RowSource', 'BoundColumn', 'ColumnCount', 'ColumnWidths',
                         'LimitToList']
+        column_widths = ''
+        row_source = ''
         field_meta = self.GetFieldObject(fieldName)
         for property in field_meta.Properties:
             if property.Name == 'DisplayControl':
@@ -320,6 +322,9 @@ def CompareLookupProperties(soln_table, soln_field, stdnt_table, stdnt_field):
     else:
         report += ['\tDisplay control DOES NOT match\n\t\tSOLN display control:{}\n\t\tSTDNT display control: '
                    '{}\n'.format(soln_lookup.DisplayControl, stdnt_lookup.DisplayControl)]
+        if 'Combo' in soln_lookup.DisplayControl and 'Text' in stdnt_lookup.DisplayControl:
+            return Lookup(display_control, row_source_type, row_source, bound_column, column_count, column_widths,
+                  limit_to_list), report
     if stdnt_lookup.RowSourceType == soln_lookup.RowSourceType:
         row_source_type = 1
         report += ['\tRow source type matches\n']
@@ -530,21 +535,18 @@ def GradeRelationships(rltn_dict1, rltn_dict2, debug=False):
 
 
 def ExactRecordsMatch(table1, table2):
-    if table1.RecordCount == table2.RecordCount:
-        table1_recs = table1.GetRecords()
-        if table1.RecordCount is None:
-            table1.RecordCount = len(table1_recs)
-        table2_recs = table2.GetRecords()
-        if table2.RecordCount is None:
-            table2.RecordCount = len(table2_recs)
-        if table1.RecordCount != table2.RecordCount:
-            return 0
-        # check exact table match (i.e. row,col values all match)
-        for cnt, row in enumerate(table1_recs):
-            if row != table2_recs[cnt]:
-                return 0
-    else:
+    #print('Pre if: Table1 # Recs :{}\tTable2 # Recs: {}'.format(table1.RecordCount, table2.RecordCount))
+    table2_recs = table2.GetRecords()
+    table2.RecordCount = len(table2_recs)
+    table1_recs = table1.GetRecords()
+    table1.RecordCount = len(table1_recs)
+    #print('In if: Table1 # Recs :{}\tTable2 # Recs: {}'.format(table1.RecordCount, table2.RecordCount))
+    if table1.RecordCount != table2.RecordCount:
         return 0
+        # check exact table match (i.e. row,col values all match)
+    for cnt, row in enumerate(table1_recs):
+        if row != table2_recs[cnt]:
+            return 0
     return 1
 
 
